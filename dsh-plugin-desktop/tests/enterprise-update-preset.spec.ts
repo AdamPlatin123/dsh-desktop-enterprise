@@ -40,11 +40,23 @@ describe('enterprise update source preset', () => {
       .toEqual({ status: 'disabled', reason })
   })
 
-  it('never resolves to the public upstream endpoint', () => {
-    const resolved = resolveEnterpriseUpdatePreset({
-      [ENTERPRISE_UPDATE_URL_OVERRIDE]: 'https://updates.corp.example',
-    })
-    if (resolved.status !== 'ok') throw new Error('preset should resolve')
-    expect(resolved.origin).not.toContain('dshdesktop.cn')
+  it.each([
+    'https://www.dshdesktop.cn',
+    'https://dshdesktop.cn',
+    'http://update.dshdesktop.cn:8443/',
+    'https://DSHDESKTOP.CN',
+  ])('rejects a preset naming the upstream public update domain %s', candidate => {
+    expect(resolveEnterpriseUpdatePreset({ [ENTERPRISE_UPDATE_URL_OVERRIDE]: candidate }))
+      .toEqual({
+        status: 'disabled',
+        reason: 'the preset update source must not name the upstream public update domain',
+      })
+  })
+
+  it('accepts hosts that merely embed the upstream name inside another domain', () => {
+    expect(resolveEnterpriseUpdatePreset({ [ENTERPRISE_UPDATE_URL_OVERRIDE]: 'https://dshdesktop.cn.corp.example' }))
+      .toEqual({ status: 'ok', origin: 'https://dshdesktop.cn.corp.example' })
+    expect(resolveEnterpriseUpdatePreset({ [ENTERPRISE_UPDATE_URL_OVERRIDE]: 'https://updates.corp.example' }))
+      .toEqual({ status: 'ok', origin: 'https://updates.corp.example' })
   })
 })

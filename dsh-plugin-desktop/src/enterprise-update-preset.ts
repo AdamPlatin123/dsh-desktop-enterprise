@@ -19,6 +19,19 @@ export const ENTERPRISE_UPDATE_URL_OVERRIDE = 'DSH_ENTERPRISE_UPDATE_URL'
 /** Version metadata path served below the preset origin (documented contract). */
 export const DESKTOP_UPDATE_VERSION_PATH = '/api/desktop/version'
 
+/**
+ * Upstream public update domain. Presets naming it — the bare domain or any
+ * subdomain — are rejected outright with a dedicated reason instead of being
+ * accepted as an ordinary origin.
+ */
+export const UPSTREAM_UPDATE_DOMAIN = 'dshdesktop.cn'
+
+/** Whether a URL hostname is the upstream public update domain or a subdomain. */
+function isUpstreamUpdateHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return host === UPSTREAM_UPDATE_DOMAIN || host.endsWith(`.${UPSTREAM_UPDATE_DOMAIN}`)
+}
+
 /** Resolved update-source preset. `disabled` is the fail-closed default. */
 export type EnterpriseUpdatePreset =
   | { readonly status: 'ok', readonly origin: string }
@@ -48,6 +61,12 @@ export function resolveEnterpriseUpdatePreset(
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     return Object.freeze({ status: 'disabled', reason: 'the preset update source must use http or https' })
+  }
+  if (isUpstreamUpdateHost(url.hostname)) {
+    return Object.freeze({
+      status: 'disabled',
+      reason: 'the preset update source must not name the upstream public update domain',
+    })
   }
   if (url.username !== '' || url.password !== '') {
     return Object.freeze({ status: 'disabled', reason: 'the preset update source must not embed credentials' })

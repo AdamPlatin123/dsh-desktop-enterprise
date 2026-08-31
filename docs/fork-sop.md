@@ -101,4 +101,4 @@ scripts/sync-upstream.sh            # 默认 dry-run：校验 pin 一致性，�
 scripts/sync-upstream.sh --check    # 同上（显式）
 ```
 
-检查项：子模块指针与 `upstream.json` 一致、vendored runtime `--check` 通过、resolutions 锁定与运行时版本一致、第 2 节企业文件全部在位、`main.ts` 关键锚字符串在位。`--apply` 等真实升级动作**有意不提供**：升级必须按第 3 节人工逐步执行并留痕。
+检查项：子模块指针与 `upstream.json` 一致、vendored runtime `--check` 通过、resolutions 锁定与运行时版本一致、第 2 节企业文件全集在位（含 `enterprise-login-copy.ts`、native-ui 三件套与全部企业测试 spec）、`main.ts` 之外四个被改上游文件的护栏锚字符串在位——`index.ts` 的 `enterpriseSessionRejection(ctx.get('desktopEnterprise')`（企业会话栅栏）、`updates.ts` 的 `no self-hosted update source is preset`（预置门）、`electron-runtime.ts` 的 `update downloads require a preset self-hosted update origin`（无源点抛错兜底）、`update-lifecycle.ts` 的 `endpoint: this.options.endpoint`（endpoint 必填）。升级丢失任一护栏时 dry-run 变红。`--apply` 等真实升级动作**有意不提供**：升级必须按第 3 节人工逐步执行并留痕。

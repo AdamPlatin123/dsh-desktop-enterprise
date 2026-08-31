@@ -20,7 +20,7 @@ This policy covers the desktop client built from this repository when it is conf
 ## 2. Summary
 
 - All model and tool traffic goes to **your organization's gateway** (the preset `DSH_ENTERPRISE_GATEWAY_URL`). No third-party model service is configured by this build.
-- **Update checks are off by default.** No production code path can reach the upstream public update service: the update preset resolver structurally rejects that domain, and version checks and installer downloads run only if the deployment presets a self-hosted update origin (`DSH_ENTERPRISE_UPDATE_URL`). Nothing update-related is sent otherwise.
+- **Update checks are off by default.** No production code path can reach the upstream public update service: the update preset resolver rejects that domain and its subdomains outright, and version checks and installer downloads run only if the deployment presets a self-hosted update origin (`DSH_ENTERPRISE_UPDATE_URL`). Nothing update-related is sent otherwise.
 - **Community marketplaces are disabled by default.** The market provider starts in the `disabled` state and contacts nothing until explicitly enabled.
 - **Telemetry is off by default.** A minimal privacy-telemetry module (client version, online status, error counts) ships ready but has no call site in this build; if a deployment later enables it, reports go only to the organization gateway.
 - The installation UUID is generated and stored locally. In the default configuration it **never leaves the device**; it is only sent to organization-run endpoints (preset update source or enabled telemetry), and never to any public upstream endpoint.
@@ -53,7 +53,7 @@ In this build the reporter is **dormant**: no code constructs or configures it, 
 
 ## 5. Update checks and the installation UUID (default off; self-hosted only)
 
-- With no preset update origin, the client registers no update tray item, no update route, and no background poll — **zero update-related egress**. An invalid preset is treated the same way (disabled, with a logged reason). There is no fallback to any public endpoint.
+- With no preset update origin, the client registers no update tray item, no update route, and no background poll — **zero update-related egress**. An invalid preset is treated the same way (disabled, with a logged reason), and a preset naming the upstream public update domain (`dshdesktop.cn` or any of its subdomains) is rejected outright with a dedicated reason. There is no fallback to any public endpoint.
 - When a deployment presets a self-hosted origin, the client periodically requests `GET {origin}/api/desktop/version` and, after explicit user confirmation per download, fetches installers from `{origin}/api/downloads/mac` or `/windows`. The version request carries the client version header and the installation UUID; download requests do not. The format is the upstream version-metadata contract (`{"version": "<stable SemVer>"}`, ≤ 4 KiB); signature verification is a planned server-side (T17) extension — the client does not yet require one.
 - The installation UUID is a random UUID v4 generated locally, persisted under the Electron user-data directory (`identity/installation-id`, restrictive file permissions), regenerated only if the file is missing or corrupt, and never derived from hardware or account identifiers. It identifies a user-data directory, not a physical machine.
 
@@ -64,9 +64,9 @@ In this build the reporter is **dormant**: no code constructs or configures it, 
 | Organization gateway | The data plane above | Always, once the user signs in. |
 | Self-hosted update origin | **Off** — not preset | Only if the deployment presets `DSH_ENTERPRISE_UPDATE_URL`. |
 | Community market sources (npm registry, GitHub raw, catalog URLs) | **Disabled** — provider starts `disabled` | Only if a user explicitly selects a provider; a deployment can point npm and the catalog at internal mirrors (see `docs/enterprise-self-hosting.md`). |
-| `dshdesktop.cn` or any upstream public service | **Never** | No production code path reaches it: the update preset resolver structurally cannot resolve to it, and the runtime refuses to download without a preset origin. |
+| `dshdesktop.cn` or any upstream public service | **Never** | No production code path reaches it: the update preset resolver rejects that domain and its subdomains outright, and the runtime refuses to download without a preset origin. |
 | Upstream session telemetry endpoint | `DISABLED` | Only if an operator explicitly sets `DSH_TELEMETRY_MODE`. |
-| `electronjs.org/headers` | Development only | Electron header downloads during development/dependency setup; not on the packaged app's runtime path. |
+| npm registries, dependency hosts, and the Electron Node-headers service (`https://electronjs.org/headers`) | **Runtime on demand** | When profile dependencies are materialized at startup, or when you run pnpm/terminal operations, the bundled package manager may contact them. The Electron headers URL is pinned via `npm_config_disturl`; the Electron binary download itself honors the standard `ELECTRON_MIRROR` environment variable, which a deployment can preset to an internal mirror (the materializer child process inherits the deployment's environment). Not contacted when no profile dependency materialization or package operation runs. |
 
 ## 7. Local data
 

@@ -7,7 +7,7 @@
 ### 1.1 行为
 
 - 打包时通过构建环境变量 `DSH_ENTERPRISE_UPDATE_URL` 预置自建更新源**源点（origin）**；未设置（空字符串，默认）时，更新检查**完全关闭**：不注册托盘"检查更新"命令、不注册设置页更新路由、不发起任何后台轮询或下载。
-- 预置值非法（非绝对 URL、非 http/https、内嵌凭据、带查询/片段/路径）时同样按关闭处理，并在日志中给出原因；**不存在**回退到上游公共端点的路径。
+- 预置值非法（非绝对 URL、非 http/https、内嵌凭据、带查询/片段/路径）时同样按关闭处理，并在日志中给出原因；预置值命名为上游公共更新域名（`dshdesktop.cn` 及其任意子域，大小写不敏感）时会被以专门理由**直接拒绝**；**不存在**回退到上游公共端点的路径。
 - 开发与无打包测试可通过同名运行时环境变量 `DSH_ENTERPRISE_UPDATE_URL` 覆盖构建预置。
 
 ### 1.2 预置后的请求面
@@ -51,7 +51,8 @@
 - 本机生成、持久于 `<userData>/identity/installation-id` 的随机 UUID v4（0600/0700 权限），非硬件标识。
 - 企业默认形态下更新检查关闭，该标识**不出网**。仅当管理员预置了自建更新源（发给贵组织源点）或启用遥测（发给贵组织网关）时才会传出；任何情况下都不会发往上游公共端点。
 
-## 5. 其余固定网络行为（非第三方）
+## 5. 其余网络行为（依赖物化与包操作，按需发生）
 
-- Electron 头文件下载 `https://electronjs.org/headers`：仅开发/依赖物化场景（pnpm/Electron 安装），不出现在打包应用的正常运行路径。
+- **Electron 头文件与包管理外联**：当 profile 依赖需要在启动时物化，或用户执行 pnpm/终端包操作时，内置包管理器可能访问 npm registry、依赖承载方，以及经 `npm_config_disturl` 固定的 Electron Node 头文件服务 `https://electronjs.org/headers`（该地址当前为代码内硬编码，分布于 `profile-materializer.ts`、`pnpm.ts`、`desktop-runtime-environment.ts`、`desktop-terminal.ts`、`recovery-plugin-uninstall.ts`）。这是**打包应用运行路径上的按需外联**，未发生物化/包操作时不访问。
+- **内网镜像配置**：Electron 二进制下载遵循标准 `ELECTRON_MIRROR` 环境变量（@electron/get 语义），物化与包操作子进程继承部署方环境——在启动客户端前预设 `ELECTRON_MIRROR=https://mirror.corp.example/electron`（及可选 `ELECTRON_CUSTOM_DIR`）即可把二进制下载引到内网镜像。`npm_config_disturl` 无对应环境覆盖；若内网完全阻断 `electronjs.org/headers` 且 profile 含原生依赖，物化会失败——此属 fork 级改造点，升级决策见 `docs/fork-sop.md` 安全停留节。
 - 模型与工具流量全部经企业网关（登录、令牌刷新、身份读取、LLM 代际令牌与对话出口），见隐私政策。

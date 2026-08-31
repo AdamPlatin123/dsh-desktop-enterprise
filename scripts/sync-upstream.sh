@@ -84,6 +84,7 @@ done <<'ENTERPRISE_FILES'
 FORK.md
 docs/fork-sop.md
 docs/enterprise-self-hosting.md
+scripts/sync-upstream.sh
 PRIVACY.md
 PRIVACY.zh.md
 PRIVACY.i18n.yaml
@@ -92,6 +93,7 @@ dsh-plugin-desktop/src/enterprise-oauth.ts
 dsh-plugin-desktop/src/enterprise-loopback-callback.ts
 dsh-plugin-desktop/src/enterprise-login-window.ts
 dsh-plugin-desktop/src/enterprise-login-coordinator.ts
+dsh-plugin-desktop/src/enterprise-login-copy.ts
 dsh-plugin-desktop/src/enterprise-token-store.ts
 dsh-plugin-desktop/src/enterprise-token-refresher.ts
 dsh-plugin-desktop/src/enterprise-llm-tokens.ts
@@ -104,27 +106,49 @@ dsh-plugin-desktop/src/enterprise-telemetry.ts
 dsh-plugin-desktop/src/enterprise-desktop-routes.ts
 dsh-plugin-desktop/src/enterprise-cordis-patch.ts
 dsh-plugin-desktop/src/client/enterprise-session-banner.ts
+dsh-plugin-desktop/src/native-ui/enterprise-login.html
+dsh-plugin-desktop/src/native-ui/enterprise-login/main.ts
+dsh-plugin-desktop/src/native-ui/enterprise-login/style.css
+dsh-plugin-desktop/tests/client-enterprise-identity.spec.ts
 dsh-plugin-desktop/tests/enterprise-launch-environment.spec.ts
 dsh-plugin-desktop/tests/enterprise-gate.spec.ts
+dsh-plugin-desktop/tests/enterprise-oauth.spec.ts
+dsh-plugin-desktop/tests/enterprise-loopback-callback.spec.ts
+dsh-plugin-desktop/tests/enterprise-login-window.spec.ts
+dsh-plugin-desktop/tests/enterprise-login-coordinator.spec.ts
+dsh-plugin-desktop/tests/enterprise-token-store.spec.ts
+dsh-plugin-desktop/tests/enterprise-token-refresher.spec.ts
+dsh-plugin-desktop/tests/enterprise-llm-tokens.spec.ts
+dsh-plugin-desktop/tests/enterprise-llm-token-refresher.spec.ts
+dsh-plugin-desktop/tests/enterprise-identity.spec.ts
+dsh-plugin-desktop/tests/enterprise-gateway-preset.spec.ts
 dsh-plugin-desktop/tests/enterprise-update-preset.spec.ts
 dsh-plugin-desktop/tests/enterprise-telemetry.spec.ts
+dsh-plugin-desktop/tests/enterprise-desktop-routes.spec.ts
+dsh-plugin-desktop/tests/enterprise-cordis-patch.spec.ts
 ENTERPRISE_FILES
 
-# 5. The main.ts intrusion anchors are in place (docs/fork-sop.md section 2.2).
-main_ts=dsh-plugin-desktop/src/main.ts
-while IFS= read -r anchor; do
-  if grep -qF -- "$anchor" "$main_ts"; then
-    ok "main.ts anchor present: $anchor"
+# 5. Intrusion anchors of the modified upstream files are in place
+# (docs/fork-sop.md section 2.2). If an upgrade silently reverts one of
+# these enterprise guard layers, the dry run turns red here.
+while IFS='|' read -r relative_path anchor; do
+  [ -n "$relative_path" ] || continue
+  if grep -qF -- "$anchor" "$relative_path"; then
+    ok "anchor present in $relative_path: $anchor"
   else
-    fail "main.ts anchor missing: $anchor"
+    fail "anchor missing in $relative_path: $anchor"
   fi
-done <<'MAIN_ANCHORS'
-from './enterprise-gate.ts'
-const updatePreset = resolveEnterpriseUpdatePreset()
-const environment = createDesktopEnterpriseLaunchEnvironment(loadLayeredEnv(BIN_NAME, process.cwd()))
-const enterprisePreset = resolveEnterpriseGatewayPreset(process.env)
-provide('desktopEnterprise'
-MAIN_ANCHORS
+done <<'INTRUSION_ANCHORS'
+dsh-plugin-desktop/src/main.ts|from './enterprise-gate.ts'
+dsh-plugin-desktop/src/main.ts|const updatePreset = resolveEnterpriseUpdatePreset()
+dsh-plugin-desktop/src/main.ts|const environment = createDesktopEnterpriseLaunchEnvironment(loadLayeredEnv(BIN_NAME, process.cwd()))
+dsh-plugin-desktop/src/main.ts|const enterprisePreset = resolveEnterpriseGatewayPreset(process.env)
+dsh-plugin-desktop/src/main.ts|provide('desktopEnterprise'
+dsh-plugin-desktop/src/index.ts|enterpriseSessionRejection(ctx.get('desktopEnterprise')
+dsh-plugin-desktop/src/updates.ts|no self-hosted update source is preset
+dsh-plugin-desktop/src/electron-runtime.ts|update downloads require a preset self-hosted update origin
+dsh-plugin-desktop/src/update-lifecycle.ts|endpoint: this.options.endpoint
+INTRUSION_ANCHORS
 
 if [ "$status" -eq 0 ]; then
   echo "sync-upstream: all fork upgrade invariants hold (dry-run, nothing modified)"
