@@ -28,7 +28,10 @@ export const UPSTREAM_UPDATE_DOMAIN = 'dshdesktop.cn'
 
 /** Whether a URL hostname is the upstream public update domain or a subdomain. */
 function isUpstreamUpdateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase()
+  // A fully qualified domain name may carry trailing dot(s) (WHATWG URL keeps
+  // them in the hostname); strip them before matching so `dshdesktop.cn.`
+  // cannot bypass the guard.
+  const host = hostname.toLowerCase().replace(/\.+$/, '')
   return host === UPSTREAM_UPDATE_DOMAIN || host.endsWith(`.${UPSTREAM_UPDATE_DOMAIN}`)
 }
 

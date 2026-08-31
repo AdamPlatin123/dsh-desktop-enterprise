@@ -45,6 +45,9 @@ describe('enterprise update source preset', () => {
     'https://dshdesktop.cn',
     'http://update.dshdesktop.cn:8443/',
     'https://DSHDESKTOP.CN',
+    'https://dshdesktop.cn.',
+    'https://www.dshdesktop.cn.',
+    'https://DSHDESKTOP.CN.',
   ])('rejects a preset naming the upstream public update domain %s', candidate => {
     expect(resolveEnterpriseUpdatePreset({ [ENTERPRISE_UPDATE_URL_OVERRIDE]: candidate }))
       .toEqual({
