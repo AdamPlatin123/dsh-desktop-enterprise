@@ -104,6 +104,15 @@ export const zh = {
   turnFailure: '用户回合失败',
   jobCompletion: '后台任务完成',
   jobFailure: '后台任务失败',
+  accountTitle: '组织账户',
+  accountIntro: '当前登录的组织账户。登出后需要重新登录才能继续使用模型。',
+  accountLoading: '正在读取账户信息…',
+  accountUnavailable: '暂时无法读取账户信息。',
+  roleAdmin: '管理员',
+  roleMember: '成员',
+  signOut: '登出',
+  signingOut: '正在登出…',
+  signOutError: '暂时无法登出，请稍后再试。',
 } as const
 
 export type DesktopSettingsLocaleKey = keyof typeof zh
@@ -212,4 +221,13 @@ export const en: Record<DesktopSettingsLocaleKey, string> = {
   turnFailure: 'User turn failed',
   jobCompletion: 'Background job completed',
   jobFailure: 'Background job failed',
+  accountTitle: 'Organization account',
+  accountIntro: 'The organization account currently signed in. Model use requires signing in again after sign-out.',
+  accountLoading: 'Loading account information…',
+  accountUnavailable: 'Account information is temporarily unavailable.',
+  roleAdmin: 'Admin',
+  roleMember: 'Member',
+  signOut: 'Sign out',
+  signingOut: 'Signing out…',
+  signOutError: 'Sign-out could not be completed just now. Please try again shortly.',
 }

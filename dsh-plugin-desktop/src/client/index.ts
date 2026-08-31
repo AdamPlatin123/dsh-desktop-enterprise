@@ -12,6 +12,7 @@ import { applyAdvancedShell } from './advanced-shell.ts'
 import { startRendererBootReporter } from './boot-health.ts'
 import { applyDesktopSettings } from './desktop-settings.ts'
 import { installDesktopDirectoryPickerBridge } from './directory-picker.ts'
+import { applyEnterpriseSessionBanner } from './enterprise-session-banner.ts'
 import { parseDesktopClientEnvironment } from './environment.ts'
 import { applyExtendedShell, applyFramedShell } from './extended-shell.ts'
 import { desktopWindowService, provideDesktopWindow } from './window-service.ts'
@@ -23,10 +24,12 @@ export {
   createDesktopSettingsApi,
   desktopSettingsPaths,
   parseDesktopActionAcceptance,
+  parseDesktopEnterpriseIdentityView,
   parseDesktopRestartAcceptance,
   parseDesktopSettingsView,
 } from './desktop-settings-api.ts'
 export type {
+  DesktopEnterpriseIdentityView,
   DesktopMarketProvider,
   DesktopMarketView,
   DesktopProfileView,
@@ -88,6 +91,7 @@ export function apply(ctx: ClientContext): void {
     'dsh-plugin-desktop: native window geometry service',
   )
   const desktopSettings = applyDesktopSettings(ctx, environment)
+  applyEnterpriseSessionBanner(ctx, desktopSettings.api)
   ctx.effect(
     () => startRendererBootReporter(ctx.loader),
     'dsh-plugin-desktop: renderer boot health report',

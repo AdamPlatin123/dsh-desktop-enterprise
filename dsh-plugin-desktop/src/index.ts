@@ -57,6 +57,15 @@ import {
   handleDesktopTerminalOpenRequest,
 } from './desktop-settings-route.ts'
 import type {} from './desktop-settings-controller.ts'
+import type {} from './enterprise-desktop-routes.ts'
+import {
+  DESKTOP_ENTERPRISE_IDENTITY_PATH,
+  DESKTOP_ENTERPRISE_REAUTH_PATH,
+  DESKTOP_ENTERPRISE_SIGNOUT_PATH,
+  handleDesktopEnterpriseIdentityRequest,
+  handleDesktopEnterpriseReauthRequest,
+  handleDesktopEnterpriseSignoutRequest,
+} from './enterprise-desktop-routes.ts'
 import { DESKTOP_LAN_HTTPS_CA_PATH } from './lan-https-runtime.ts'
 import { desktopBootRecoveryInjections } from './desktop-boot-recovery.ts'
 import type { DesktopLocale, DesktopShellMode } from './runtime.ts'
@@ -328,6 +337,27 @@ export function apply(ctx: Context, config: Config): void {
           },
         }),
         `dsh-plugin-desktop: private settings route ${path}`,
+      )
+    }
+  }
+  const enterpriseSurface = ctx.get('desktopEnterprise')
+  if (enterpriseSurface !== undefined) {
+    const enterpriseRoutes = [
+      [DESKTOP_ENTERPRISE_IDENTITY_PATH, handleDesktopEnterpriseIdentityRequest],
+      [DESKTOP_ENTERPRISE_REAUTH_PATH, handleDesktopEnterpriseReauthRequest],
+      [DESKTOP_ENTERPRISE_SIGNOUT_PATH, handleDesktopEnterpriseSignoutRequest],
+    ] as const
+    for (const [path, handler] of enterpriseRoutes) {
+      ctx.effect(
+        () => ctx.webServer.register({
+          kind: 'exact',
+          path,
+          handler: (req, res) => {
+            if (rejectDesktopRequest(ctx, req, res)) return
+            return handler(req, res, rendererOrigin, enterpriseSurface)
+          },
+        }),
+        `dsh-plugin-desktop: private enterprise route ${path}`,
       )
     }
   }

@@ -6,7 +6,7 @@ import {
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  DesktopMarketProvider, DesktopProfileView, DesktopSettingsApi, DesktopSettingsView,
+  DesktopEnterpriseIdentityView, DesktopMarketProvider, DesktopProfileView, DesktopSettingsApi, DesktopSettingsView,
 } from './desktop-settings-api.ts'
 import type { DesktopSettingsLocaleKey } from './desktop-settings-locales.ts'
 import type { DesktopClientPlatform } from './environment.ts'
@@ -53,8 +53,9 @@ export type DesktopSettingsSectionProps =
   & InjectFace<DesktopSettingsSectionInjected>
 
 type Translate = DesktopSettingsSectionProps['t']
-type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-market' | 'mode' | 'material' | 'web' | 'notification'
+type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-market' | 'mode' | 'material' | 'web' | 'notification' | 'signout'
 type RestartState = 'none' | 'restarting' | 'required'
+type IdentityState = 'loading' | 'ready' | 'unavailable' | 'signed-out'
 type LanPollWait = (signal: AbortSignal) => Promise<void>
 
 const LAN_POLL_INTERVAL_MS = 250
@@ -264,6 +265,11 @@ function profileState(profile: DesktopProfileView, t: Translate): string {
   return t('profileReady')
 }
 
+/** Bounded badge for the identity role; unknown server roles render as member. */
+export function enterpriseRoleBadge(role: string): 'admin' | 'member' {
+  return role === 'admin' ? 'admin' : 'member'
+}
+
 const MARKET_OPTIONS: readonly {
   id: DesktopMarketProvider
   title: DesktopSettingsLocaleKey
@@ -319,7 +325,31 @@ export function DesktopSettingsSection({
   const [restart, setRestart] = useState<RestartState>('none')
   const [pendingProfileDelete, setPendingProfileDelete] = useState<string>()
   const [confirmLan, setConfirmLan] = useState(false)
+  const [identity, setIdentity] = useState<DesktopEnterpriseIdentityView>()
+  const [identityState, setIdentityState] = useState<IdentityState>('loading')
   const lanPoll = useRef<AbortController>()
+
+  const loadIdentity = useCallback(async () => {
+    setIdentityState('loading')
+    try {
+      const next = await api.readEnterpriseIdentity()
+      setIdentity(next)
+      setIdentityState(next === undefined ? 'signed-out' : 'ready')
+    } catch {
+      setIdentity(undefined)
+      setIdentityState('unavailable')
+    }
+  }, [api])
+
+  useEffect(() => { void loadIdentity() }, [loadIdentity])
+
+  const signOut = (): void => {
+    void run('signout', async () => {
+      await api.signOut()
+      setIdentity(undefined)
+      setIdentityState('signed-out')
+    })
+  }
 
   const refreshView = useCallback(async () => {
     lanPoll.current?.abort()
@@ -764,6 +794,37 @@ export function DesktopSettingsSection({
             onChange={checked => { setNotification('notifyOnJobFailure', checked) }}
           />
         </div>
+      </section>
+
+      <section className="dshDesktopSettingsGroup" aria-labelledby="dsh-desktop-account-title">
+        <div>
+          <h3 id="dsh-desktop-account-title">{t('accountTitle')}</h3>
+          <p className="dshDesktopSettingsGroupIntro">{t('accountIntro')}</p>
+        </div>
+        {identityState === 'loading' && <p className="dshDesktopSettingsHint">{t('accountLoading')}</p>}
+        {identityState === 'unavailable' && <p className="dshDesktopSettingsError" role="alert">{t('accountUnavailable')}</p>}
+        {identityState === 'ready' && identity !== undefined && (
+          <div className="dshDesktopSettingsList">
+            <div className="dshDesktopSettingsChoice" aria-label={t('accountTitle')}>
+              <span className="dshDesktopSettingsChoiceCopy">
+                <span className="dshDesktopSettingsChoiceTitle">
+                  {identity.username}
+                  <span className="dshDesktopSettingsBadge">
+                    {enterpriseRoleBadge(identity.role) === 'admin' ? t('roleAdmin') : t('roleMember')}
+                  </span>
+                </span>
+              </span>
+              <button
+                type="button"
+                className="dshDesktopSettingsButton dshDesktopSettingsButtonSecondary"
+                disabled={busy !== undefined}
+                onClick={signOut}
+              >
+                {busy === 'signout' ? t('signingOut') : t('signOut')}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
       {confirmLan && (
         <div className="dshDesktopSettingsDialogBackdrop" role="presentation">

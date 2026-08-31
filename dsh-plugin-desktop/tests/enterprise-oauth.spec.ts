@@ -64,15 +64,17 @@ describe('enterprise OAuth client core', () => {
       clientId: 'dsh-desktop',
       code: 'the-code',
       codeVerifier: 'the-verifier',
+      redirectUri: 'http://127.0.0.1:49152/cb',
     })
     expect(transport).toHaveBeenCalledOnce()
     const [endpoint, form] = transport.mock.calls[0] as unknown as [string, URLSearchParams]
     expect(endpoint).toBe('https://gateway.example.com/api/oauth/token')
-    expect([...form.keys()].sort()).toEqual(['client_id', 'code', 'code_verifier', 'grant_type'])
+    expect([...form.keys()].sort()).toEqual(['client_id', 'code', 'code_verifier', 'grant_type', 'redirect_uri'])
     expect(form.get('grant_type')).toBe('authorization_code')
     expect(form.get('code')).toBe('the-code')
     expect(form.get('code_verifier')).toBe('the-verifier')
     expect(form.get('client_id')).toBe('dsh-desktop')
+    expect(form.get('redirect_uri')).toBe('http://127.0.0.1:49152/cb')
     expect(tokens.accessToken).toBe('at')
     expect(tokens.refreshToken).toBe('rt')
     expect(tokens.expiresInSeconds).toBe(600)
@@ -105,6 +107,7 @@ describe('enterprise OAuth client core', () => {
       clientId: 'dsh-desktop',
       code: 'c',
       codeVerifier: 'v',
+      redirectUri: 'http://127.0.0.1:49152/cb',
     })).rejects.toMatchObject({ code: 'invalid_grant' })
 
     const serverError = async (): Promise<{ status: number, text: string }> =>
@@ -114,6 +117,7 @@ describe('enterprise OAuth client core', () => {
       clientId: 'dsh-desktop',
       code: 'c',
       codeVerifier: 'v',
+      redirectUri: 'http://127.0.0.1:49152/cb',
     })).rejects.toMatchObject({ code: 'server_error' })
 
     const clientError = async (): Promise<{ status: number, text: string }> =>
@@ -133,6 +137,7 @@ describe('enterprise OAuth client core', () => {
       clientId: 'dsh-desktop',
       code: 'c',
       codeVerifier: 'v',
+      redirectUri: 'http://127.0.0.1:49152/cb',
     })).rejects.toBeInstanceOf(EnterpriseOAuthError)
 
     const badExpires = async (): Promise<{ status: number, text: string }> =>
@@ -142,6 +147,7 @@ describe('enterprise OAuth client core', () => {
       clientId: 'dsh-desktop',
       code: 'c',
       codeVerifier: 'v',
+      redirectUri: 'http://127.0.0.1:49152/cb',
     })).rejects.toMatchObject({ code: 'malformed_response' })
 
     const networkFailure = async (): Promise<never> => {
@@ -152,6 +158,7 @@ describe('enterprise OAuth client core', () => {
       clientId: 'dsh-desktop',
       code: 'c',
       codeVerifier: 'v',
+      redirectUri: 'http://127.0.0.1:49152/cb',
     })).rejects.toMatchObject({ code: 'network' })
   })
 

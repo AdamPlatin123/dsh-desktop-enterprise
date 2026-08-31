@@ -171,6 +171,12 @@ export async function exchangeEnterpriseAuthorizationCode(
     readonly clientId: string
     readonly code: string
     readonly codeVerifier: string
+    /**
+     * The redirect_uri of the authorization request, echoed in the grant per
+     * RFC 6749 §4.1.3: the server compares it to the recorded value and
+     * rejects the exchange with `invalid_grant` when it is absent.
+     */
+    readonly redirectUri: string
   },
 ): Promise<EnterpriseTokenResponse> {
   const form = new URLSearchParams({
@@ -178,6 +184,7 @@ export async function exchangeEnterpriseAuthorizationCode(
     code: options.code,
     code_verifier: options.codeVerifier,
     client_id: options.clientId,
+    redirect_uri: options.redirectUri,
   })
   let result: Awaited<ReturnType<EnterpriseTokenTransport>>
   try {
@@ -213,6 +220,36 @@ export async function refreshEnterpriseTokens(
   }
   assertHttpOk(result.status, result.text)
   return parseTokenResponse(result.text)
+}
+
+/**
+ * RFC 7009 revocation of one token (access token → its row; refresh token →
+ * the whole family). The server answers 200 even for unknown tokens, so a
+ * resolved promise only means the request completed — sign-out proceeds with
+ * local cleanup regardless of the outcome.
+ */
+export async function revokeEnterpriseToken(
+  transport: EnterpriseTokenTransport,
+  options: {
+    readonly gatewayUrl: string
+    readonly clientId: string
+    readonly token: string
+    /** RFC 7009 §2.1 hint; the server accepts either without it. */
+    readonly tokenTypeHint?: 'access_token' | 'refresh_token'
+  },
+): Promise<boolean> {
+  const form = new URLSearchParams({
+    client_id: options.clientId,
+    token: options.token,
+    ...(options.tokenTypeHint === undefined ? {} : { token_type_hint: options.tokenTypeHint }),
+  })
+  let result: Awaited<ReturnType<EnterpriseTokenTransport>>
+  try {
+    result = await transport(new URL('/api/oauth/revoke', options.gatewayUrl).href, form)
+  } catch {
+    return false
+  }
+  return result.status >= 200 && result.status < 300
 }
 
 /**

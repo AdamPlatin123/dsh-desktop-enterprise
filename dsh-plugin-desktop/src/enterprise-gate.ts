@@ -2,20 +2,33 @@
 
 import type { DesktopLocale } from './runtime.ts'
 import { resolveEnterpriseGatewayPreset, ENTERPRISE_OAUTH_SCOPE } from './enterprise-gateway-preset.ts'
-import { fetchEnterpriseTokenTransport, refreshEnterpriseTokens, type EnterpriseTokenTransport } from './enterprise-oauth.ts'
+import {
+  fetchEnterpriseTokenTransport,
+  refreshEnterpriseTokens,
+  revokeEnterpriseToken,
+  type EnterpriseTokenTransport,
+} from './enterprise-oauth.ts'
 import { ENTERPRISE_LOGIN_TIMEOUT_MS } from './enterprise-loopback-callback.ts'
 import { EnterpriseTokenRefresher } from './enterprise-token-refresher.ts'
 import {
   EnterpriseTokenStoreError,
+  clearEnterpriseTokens,
   enterpriseTokenValidity,
   readEnterpriseTokens,
   saveEnterpriseTokens,
   type EnterpriseTokenSet,
 } from './enterprise-token-store.ts'
+import {
+  fetchEnterpriseIdentityTransport,
+  fetchEnterpriseIdentity,
+  type EnterpriseIdentity,
+  type EnterpriseIdentityTransport,
+} from './enterprise-identity.ts'
+import type { EnterpriseLlmTokenTransport } from './enterprise-llm-tokens.ts'
 import type { DesktopLanHttpsPrivateKeyProtector } from './lan-https-certificate.ts'
 import type { EnterpriseLoginView } from './enterprise-login-copy.ts'
 import { EnterpriseLoginCoordinator, type EnterpriseLoginUi } from './enterprise-login-coordinator.ts'
-import { renderEnterpriseMachinePatch, writeEnterpriseMachinePatch } from './enterprise-cordis-patch.ts'
+import { renderEnterpriseMachinePatch, writeEnterpriseMachinePatch, type EnterpriseMachinePatchOutcome } from './enterprise-cordis-patch.ts'
 import type {
   DesktopEnterpriseLoginResult,
   DesktopEnterpriseLoginWindowInput,
@@ -50,6 +63,18 @@ export interface DesktopEnterpriseGateDeps {
   readonly env?: Readonly<Record<string, string | undefined>>
   readonly timeoutMs?: number
   readonly patchWriter?: typeof writeEnterpriseMachinePatch
+  /** LLM代际-token issuance transport; tests substitute a recording fake. */
+  readonly llmTokenTransport?: EnterpriseLlmTokenTransport
+  /** Userinfo transport for the identity projection; tests substitute a fake. */
+  readonly identityTransport?: EnterpriseIdentityTransport
+  /**
+   * Session established (fresh login, silent refresh at gate entry, or
+   * re-login): the launcher issues the first LLM token and starts its chain
+   * here, before Host boot. Failures must never fail the login itself.
+   */
+  readonly onSessionEstablished?: () => void | Promise<void>
+  /** Session ended by explicit sign-out: clear the LLM env and stop its chain. */
+  readonly onSessionEnded?: () => void
 }
 
 export type DesktopEnterpriseGateRunResult =
@@ -74,11 +99,17 @@ export class DesktopEnterpriseGate {
   private presetUrl: string | undefined
   private presetClientId: string | undefined
   private reauthing = false
+  private identity: EnterpriseIdentity | undefined
 
   constructor(private readonly deps: DesktopEnterpriseGateDeps) {
     this.transport = deps.transport ?? fetchEnterpriseTokenTransport
     this.now = deps.now ?? (() => Date.now())
     this.timeoutMs = deps.timeoutMs ?? ENTERPRISE_LOGIN_TIMEOUT_MS
+  }
+
+  /** Identity projection for the settings-page account area; undefined until first read. */
+  getIdentity(): EnterpriseIdentity | undefined {
+    return this.identity
   }
 
   /** Surface for main's activation/second-instance reveal chain. */
@@ -88,17 +119,25 @@ export class DesktopEnterpriseGate {
     return true
   }
 
-  /** Install the machine patch (13.3); failures log but do not block login. */
-  private async installMachinePatch(gatewayUrl: string): Promise<void> {
+  /**
+   * Install the machine patch (13.3) under the fail-closed rule (14.1/O4):
+   * the login may only proceed when the enterprise model route is locked.
+   * A write failure returns 'patch-failed' and an admin-authored file returns
+   * 'patch-admin-kept'; the caller blocks sign-in behind the matching view.
+   */
+  private async installMachinePatch(gatewayUrl: string): Promise<EnterpriseMachinePatchOutcome | 'patch-failed'> {
     const document = renderEnterpriseMachinePatch({ gatewayUrl })
     const write = this.deps.patchWriter ?? writeEnterpriseMachinePatch
     try {
       const outcome = await write(this.deps.homeDir, document)
       if (outcome.status === 'admin-file-kept') {
-        this.deps.logger.error(`${BIN_NAME}: an admin-authored cordis.patch.yml exists in the DSH home; the enterprise model route was not applied`)
+        this.deps.logger.error(`${BIN_NAME}: an admin-authored cordis.patch.yml exists in the DSH home; the enterprise model route was not applied and sign-in stays blocked`)
       }
+      return outcome
     } catch (cause) {
-      this.deps.logger.error(`${BIN_NAME}: machine patch could not be written: ${cause instanceof Error ? cause.message : String(cause)}`)
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      this.deps.logger.error(`${BIN_NAME}: machine patch could not be written; sign-in stays blocked: ${detail}`)
+      return 'patch-failed'
     }
   }
 
@@ -184,7 +223,14 @@ export class DesktopEnterpriseGate {
       return { outcome: 'quit' }
     }
 
-    await this.installMachinePatch(preset.gatewayUrl)
+    const patchOutcome = await this.installMachinePatch(preset.gatewayUrl)
+    if (patchOutcome === 'patch-failed' || patchOutcome.status === 'admin-file-kept') {
+      const window = await this.createGateWindow(this.windowInput(
+        patchOutcome === 'patch-failed' ? 'patch-failed' : 'patch-admin-kept',
+      ))
+      await window.run()
+      return { outcome: 'quit' }
+    }
 
     let tokens: EnterpriseTokenSet | undefined
     try {
@@ -209,7 +255,10 @@ export class DesktopEnterpriseGate {
       const refreshed = await this.refreshExisting(tokens)
       tokens = refreshed ? await readEnterpriseTokens(this.deps.userDataDir, this.deps.protector).catch(() => undefined) : undefined
     }
-    if (tokens !== undefined) return { outcome: 'authenticated' }
+    if (tokens !== undefined) {
+      await this.establishSession()
+      return { outcome: 'authenticated' }
+    }
 
     return await this.runLoginWindow()
   }
@@ -276,7 +325,39 @@ export class DesktopEnterpriseGate {
       this.window = undefined
     }
     if (result.action === 'quit') return { outcome: 'quit' }
+    await this.establishSession()
     return { outcome: 'authenticated' }
+  }
+
+  /**
+   * Refresh the identity projection and hand session establishment to the
+   * launcher (first LLM-token issuance). Best-effort: a network failure here
+   * degrades to a stale identity or an unissued token that the runtime chain
+   * retries — it never turns a verified session into a login failure.
+   */
+  private async establishSession(): Promise<void> {
+    await this.updateIdentity()
+    try {
+      await this.deps.onSessionEstablished?.()
+    } catch (cause) {
+      this.deps.logger.error(`${BIN_NAME}: session establishment failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+  }
+
+  /** Re-read userinfo with the current access token; keeps the last good identity on failure. */
+  private async updateIdentity(): Promise<void> {
+    const tokens = await readEnterpriseTokens(this.deps.userDataDir, this.deps.protector).catch(() => undefined)
+    if (tokens === undefined || !enterpriseTokenValidity(tokens, this.now()).accessValid) return
+    try {
+      this.identity = await fetchEnterpriseIdentity(
+        this.deps.identityTransport ?? fetchEnterpriseIdentityTransport,
+        { gatewayUrl: tokens.gatewayUrl, accessToken: tokens.accessToken },
+      )
+    } catch (cause) {
+      // Role changes surface on the next successful read; absence of network
+      // must not disturb an otherwise valid session.
+      this.deps.logger.error(`${BIN_NAME}: identity could not be refreshed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
   }
 
   /**
@@ -295,20 +376,71 @@ export class DesktopEnterpriseGate {
       save: tokens => saveEnterpriseTokens(this.deps.userDataDir, this.deps.protector, tokens),
       now: this.now,
       log: this.deps.logger,
-      onRefreshFailed: () => { void this.reauthAfterRefreshFailure() },
+      onRefreshFailed: () => { void this.requestReauth('session-expired') },
+      onRefreshed: () => { void this.updateIdentity() },
     })
     this.refresher.start()
   }
 
-  private async reauthAfterRefreshFailure(): Promise<void> {
+  /**
+   * Reopen the login window behind a re-login notice. Shared by the OAuth
+   * refresh-failure path and the LLM token chain's 401 (session rejected)
+   * path; concurrent requests collapse into the running one.
+   */
+  async requestReauth(notice: 'session-expired' = 'session-expired'): Promise<void> {
     if (this.reauthing) return
     this.reauthing = true
     try {
       this.refresher?.stop()
       this.refresher = undefined
-      const result = await this.runLoginWindow('session-expired')
+      const result = await this.runLoginWindow(notice)
       if (result.outcome === 'authenticated') this.startMaintenance()
       else this.deps.logger.error(`${BIN_NAME}: re-login was dismissed; the stored session remains until sign-in succeeds`)
+    } finally {
+      this.reauthing = false
+    }
+  }
+
+  /**
+   * Explicit sign-out (settings-page account area): revoke both tokens with
+   * the gateway, clear the OS-backed store and the injected LLM token, and
+   * return to the login window. Revocation is best-effort — the local cleanup
+   * and the return to sign-in happen regardless of network outcome.
+   */
+  async signout(): Promise<void> {
+    if (this.reauthing) return
+    this.reauthing = true
+    try {
+      this.refresher?.stop()
+      this.refresher = undefined
+      const tokens = await readEnterpriseTokens(this.deps.userDataDir, this.deps.protector).catch(() => undefined)
+      if (tokens !== undefined && this.presetClientId !== undefined) {
+        for (const [token, hint] of [[tokens.accessToken, 'access_token'], [tokens.refreshToken, 'refresh_token']] as const) {
+          const revoked = await revokeEnterpriseToken(this.transport, {
+            gatewayUrl: tokens.gatewayUrl,
+            clientId: this.presetClientId,
+            token,
+            tokenTypeHint: hint,
+          })
+          if (!revoked) {
+            this.deps.logger.error(`${BIN_NAME}: server-side revocation did not complete; the tokens are discarded locally regardless`)
+          }
+        }
+      }
+      try {
+        await clearEnterpriseTokens(this.deps.userDataDir)
+      } catch (cause) {
+        this.deps.logger.error(`${BIN_NAME}: stored enterprise tokens could not be removed: ${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+      this.identity = undefined
+      try {
+        this.deps.onSessionEnded?.()
+      } catch (cause) {
+        this.deps.logger.error(`${BIN_NAME}: session teardown failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+      const result = await this.runLoginWindow()
+      if (result.outcome === 'authenticated') this.startMaintenance()
+      else this.deps.logger.error(`${BIN_NAME}: sign-out completed; the application stays on the sign-in window until a session is established`)
     } finally {
       this.reauthing = false
     }

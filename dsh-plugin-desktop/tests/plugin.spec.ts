@@ -25,6 +25,11 @@ import {
   DESKTOP_DIRECTORY_VALIDATOR_PATH,
 } from '../src/directory-picker-contract.ts'
 import {
+  DESKTOP_ENTERPRISE_IDENTITY_PATH,
+  DESKTOP_ENTERPRISE_REAUTH_PATH,
+  DESKTOP_ENTERPRISE_SIGNOUT_PATH,
+} from '../src/enterprise-desktop-routes.ts'
+import {
   DESKTOP_DEVELOPER_TOOLS_TOGGLE_PATH,
   DESKTOP_DIAGNOSTICS_EXPORT_PATH,
   DESKTOP_MARKET_SELECT_PATH,
@@ -406,6 +411,9 @@ describe('desktop Host plugin', () => {
       RENDERER_BOOT_REPORT_PATH,
       DESKTOP_DIRECTORY_PICKER_PATH,
       DESKTOP_DIRECTORY_VALIDATOR_PATH,
+      DESKTOP_ENTERPRISE_IDENTITY_PATH,
+      DESKTOP_ENTERPRISE_SIGNOUT_PATH,
+      DESKTOP_ENTERPRISE_REAUTH_PATH,
     ].sort()
     const routes = harness.routes()
     expect(routes.map(route => route.path).sort()).toEqual(expectedPaths)

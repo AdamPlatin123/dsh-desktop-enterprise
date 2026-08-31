@@ -11,6 +11,8 @@ export type EnterpriseLoginView =
   | 'error'
   | 'preset-missing'
   | 'storage-unavailable'
+  | 'patch-failed'
+  | 'patch-admin-kept'
 
 export interface EnterpriseLoginCopy {
   readonly title: string
@@ -40,6 +42,10 @@ export interface EnterpriseLoginCopy {
   readonly presetMissingBody: string
   readonly storageUnavailableTitle: string
   readonly storageUnavailableBody: string
+  readonly patchFailedTitle: string
+  readonly patchFailedBody: string
+  readonly patchAdminKeptTitle: string
+  readonly patchAdminKeptBody: string
   readonly invalidState: string
 }
 
@@ -72,6 +78,10 @@ const COPY: Record<DesktopLocale, EnterpriseLoginCopy> = {
     presetMissingBody: 'This installation has no organization server preset. Contact your administrator; the deployment guide (FORK.md, enterprise deployment section) explains how to preset the gateway address and OAuth client id at build time.',
     storageUnavailableTitle: 'Secure storage is unavailable',
     storageUnavailableBody: 'This system provides no OS-backed secret storage, so the sign-in session cannot be stored safely. Contact your administrator to enable a system keyring.',
+    patchFailedTitle: 'Client lock-in configuration could not be written',
+    patchFailedBody: 'The enterprise model route could not be locked to the organization gateway, so model use stays blocked. Check that the DSH home directory is writable, then sign in again. Contact your administrator if this keeps failing.',
+    patchAdminKeptTitle: 'An administrator configuration file is in the way',
+    patchAdminKeptBody: 'The DSH home already contains an administrator-authored cordis.patch.yml, so this client could not lock the enterprise model route. Model use stays blocked until that file locks the route itself or is removed so this client can write it.',
     invalidState: 'The sign-in window could not load its state. Close this window and try again.',
   },
   zh: {
@@ -102,6 +112,10 @@ const COPY: Record<DesktopLocale, EnterpriseLoginCopy> = {
     presetMissingBody: '此安装缺少组织服务器预置配置。请联系管理员；部署文档（FORK.md 企业部署章节）说明如何在构建时预置网关地址与 OAuth 客户端 ID。',
     storageUnavailableTitle: '安全存储不可用',
     storageUnavailableBody: '当前系统没有操作系统级密钥存储，登录会话无法安全保存。请联系管理员启用系统密钥环。',
+    patchFailedTitle: '客户端锁定配置写入失败',
+    patchFailedBody: '无法把企业模型路由锁定到组织网关，模型使用已被阻止。请确认 DSH 主目录可写入后重新登录；若反复出现请联系管理员。',
+    patchAdminKeptTitle: '检测到管理员配置文件',
+    patchAdminKeptBody: 'DSH 主目录已存在管理员编写的 cordis.patch.yml，本客户端因此未能锁定企业模型路由。在该文件自行锁定路由或将其移除以让本客户端写入之前，模型使用保持阻止。',
     invalidState: '登录窗口状态加载失败。请关闭此窗口后重试。',
   },
 }

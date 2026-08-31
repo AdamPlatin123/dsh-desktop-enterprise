@@ -7,7 +7,7 @@ import type { DesktopEnterpriseLoginResult, DesktopEnterpriseLoginWindowInput, D
 import type { DesktopLanHttpsPrivateKeyProtector } from '../src/lan-https-certificate.ts'
 import { EnterpriseOAuthError } from '../src/enterprise-oauth.ts'
 import type { EnterpriseTokenSet } from '../src/enterprise-token-store.ts'
-import { saveEnterpriseTokens } from '../src/enterprise-token-store.ts'
+import { readEnterpriseTokens, saveEnterpriseTokens } from '../src/enterprise-token-store.ts'
 
 const PRESET_ENV = Object.freeze({
   DSH_ENTERPRISE_GATEWAY_URL: 'https://gateway.example.com',
@@ -71,8 +71,14 @@ async function harness({ env = PRESET_ENV, protector = reverseProtector() }: Gat
     status: 200,
     text: JSON.stringify({ access_token: 'access-rotated', refresh_token: 'refresh-rotated', expires_in: 600, token_type: 'Bearer' }),
   }))
+  const identityTransport = vi.fn(async () => ({
+    status: 200,
+    text: JSON.stringify({ sub: 'u-1', username: 'member', role: 'member' }),
+  }))
   const logger = { error: vi.fn() }
   const patchWriter = vi.fn(async (_homeDir: string, _document: string) => ({ status: 'written' as const }))
+  const onSessionEstablished = vi.fn()
+  const onSessionEnded = vi.fn()
   const gate = new DesktopEnterpriseGate({
     userDataDir,
     homeDir,
@@ -86,13 +92,19 @@ async function harness({ env = PRESET_ENV, protector = reverseProtector() }: Gat
     transport,
     env,
     patchWriter,
+    identityTransport,
+    onSessionEstablished,
+    onSessionEnded,
   })
   return {
     gate,
     fake,
     transport,
+    identityTransport,
     logger,
     patchWriter,
+    onSessionEstablished,
+    onSessionEnded,
     userDataDir,
     homeDir,
     dispose: async () => {
@@ -311,6 +323,134 @@ describe('desktop enterprise gate', () => {
       await vi.waitFor(() => { expect(transport.mock.calls.length).toBeGreaterThan(callsBefore) }, { timeout: 5000 })
       gate.dispose()
     } finally {
+      await dispose()
+    }
+  })
+
+  it('blocks sign-in behind the patch-failed view when the machine patch cannot be written', async () => {
+    const { gate, fake, patchWriter, dispose } = await harness()
+    patchWriter.mockImplementation(async () => { throw new Error('EACCES on the DSH home') })
+    try {
+      const pending = gate.run()
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(1) })
+      expect(fake.windows[0]?.inputs[0]?.view).toBe('patch-failed')
+      fake.finish(0, { action: 'quit' })
+      await expect(pending).resolves.toEqual({ outcome: 'quit' })
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('blocks sign-in behind the patch-admin-kept view when an admin file exists', async () => {
+    const { gate, fake, patchWriter, dispose } = await harness()
+    patchWriter.mockResolvedValue({ status: 'admin-file-kept' } as unknown as Awaited<ReturnType<typeof patchWriter>>)
+    try {
+      const pending = gate.run()
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(1) })
+      expect(fake.windows[0]?.inputs[0]?.view).toBe('patch-admin-kept')
+      fake.finish(0, { action: 'quit' })
+      await expect(pending).resolves.toEqual({ outcome: 'quit' })
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('never reaches the patch when the preset itself is missing', async () => {
+    const { gate, fake, patchWriter, dispose } = await harness({ env: {} })
+    try {
+      const pending = gate.run()
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(1) })
+      expect(patchWriter).not.toHaveBeenCalled()
+      fake.finish(0, { action: 'quit' })
+      await expect(pending).resolves.toEqual({ outcome: 'quit' })
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('establishes the session and the identity projection on a stored-session boot', async () => {
+    const { gate, identityTransport, onSessionEstablished, dispose, userDataDir } = await harness()
+    try {
+      await saveEnterpriseTokens(userDataDir, reverseProtector(), storedTokens())
+      await expect(gate.run()).resolves.toEqual({ outcome: 'authenticated' })
+      expect(onSessionEstablished).toHaveBeenCalledOnce()
+      expect(identityTransport).toHaveBeenCalledOnce()
+      const [endpoint, init] = identityTransport.mock.calls[0] as unknown as [string, { method: string, headers: Record<string, string> }]
+      expect(endpoint).toBe('https://gateway.example.com/api/oauth/userinfo')
+      expect(init.headers.authorization).toBe('Bearer access-current')
+      expect(gate.getIdentity()).toEqual({ username: 'member', role: 'member' })
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('keeps a network-failed identity read from disturbing an otherwise valid session', async () => {
+    const { gate, identityTransport, onSessionEstablished, dispose, userDataDir } = await harness()
+    try {
+      identityTransport.mockImplementation(async () => ({ status: 500, text: 'userinfo down' }))
+      await saveEnterpriseTokens(userDataDir, reverseProtector(), storedTokens())
+      await expect(gate.run()).resolves.toEqual({ outcome: 'authenticated' })
+      expect(onSessionEstablished).toHaveBeenCalledOnce()
+      expect(gate.getIdentity()).toBeUndefined()
+    } finally {
+      await dispose()
+    }
+  })
+
+  it('signs out by revoking both tokens, clearing the store, and reopening sign-in', async () => {
+    const { gate, fake, transport, onSessionEnded, onSessionEstablished, dispose, userDataDir } = await harness()
+    try {
+      await saveEnterpriseTokens(userDataDir, reverseProtector(), storedTokens())
+      await expect(gate.run()).resolves.toEqual({ outcome: 'authenticated' })
+      const establishedAfterBoot = onSessionEstablished.mock.calls.length
+
+      const signoutPromise = gate.signout()
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(1) })
+      // Revocations precede the reopened login window.
+      expect(transport.mock.calls.length).toBeGreaterThanOrEqual(2)
+      const [, accessForm] = transport.mock.calls[transport.mock.calls.length - 2] as unknown as [string, URLSearchParams]
+      const [, refreshForm] = transport.mock.calls[transport.mock.calls.length - 1] as unknown as [string, URLSearchParams]
+      expect(accessForm.get('token')).toBe('access-current')
+      expect(accessForm.get('token_type_hint')).toBe('access_token')
+      expect(accessForm.get('client_id')).toBe('dsh-desktop')
+      expect(refreshForm.get('token')).toBe('refresh-current')
+      expect(refreshForm.get('token_type_hint')).toBe('refresh_token')
+      expect(onSessionEnded).toHaveBeenCalledOnce()
+      expect(gate.getIdentity()).toBeUndefined()
+      // The store is already empty while the reopened window waits: clearing
+      // happens before sign-in returns, never after.
+      await expect(readEnterpriseTokens(userDataDir, reverseProtector())).resolves.toBeUndefined()
+
+      // A second user signs in through the reopened window; the fake window's
+      // continue resolves without a real exchange (the coordinator owns the
+      // actual token write, covered by the coordinator tests).
+      transport.mockImplementation(async () => ({
+        status: 200,
+        text: JSON.stringify({ access_token: 'access-two', refresh_token: 'refresh-two', expires_in: 600, token_type: 'Bearer' }),
+      }))
+      fake.finish(0, { action: 'continue' })
+      await expect(signoutPromise).resolves.toBeUndefined()
+      expect(onSessionEstablished.mock.calls.length).toBe(establishedAfterBoot + 1)
+    } finally {
+      gate.dispose()
+      await dispose()
+    }
+  })
+
+  it('reopens sign-in with the session-expired notice on requestReauth and collapses concurrent calls', async () => {
+    const { gate, fake, dispose, userDataDir } = await harness()
+    try {
+      await saveEnterpriseTokens(userDataDir, reverseProtector(), storedTokens())
+      await expect(gate.run()).resolves.toEqual({ outcome: 'authenticated' })
+      const first = gate.requestReauth('session-expired')
+      const second = gate.requestReauth('session-expired')
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(1) })
+      expect(fake.windows[0]?.inputs[0]?.notice).toBe('session-expired')
+      fake.finish(0, { action: 'continue' })
+      await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined])
+      expect(fake.windows).toHaveLength(1)
+    } finally {
+      gate.dispose()
       await dispose()
     }
   })

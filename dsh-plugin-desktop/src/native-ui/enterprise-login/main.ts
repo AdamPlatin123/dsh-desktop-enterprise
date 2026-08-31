@@ -129,6 +129,16 @@ function render(root: HTMLElement, locale: DesktopLocale, frame: boolean, input:
       page.appendChild(el('p', 'view-body', copy.storageUnavailableBody))
       break
     }
+    case 'patch-failed': {
+      page.appendChild(el('h2', 'view-title', copy.patchFailedTitle))
+      page.appendChild(el('p', 'view-body', copy.patchFailedBody))
+      break
+    }
+    case 'patch-admin-kept': {
+      page.appendChild(el('h2', 'view-title', copy.patchAdminKeptTitle))
+      page.appendChild(el('p', 'view-body', copy.patchAdminKeptBody))
+      break
+    }
     default: {
       page.appendChild(el('p', 'view-body', copy.invalidState))
       break

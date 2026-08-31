@@ -152,6 +152,20 @@ import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { desktopLocaleFromLanguageTag } from './tray-locale.ts'
 import { desktopNativeCopy } from './native-dialog-copy.ts'
 import { DesktopEnterpriseGate } from './enterprise-gate.ts'
+import { createDesktopEnterpriseLaunchEnvironment } from './enterprise-launch-environment.ts'
+import {
+  EnterpriseLlmTokenRefresher,
+} from './enterprise-llm-token-refresher.ts'
+import {
+  fetchEnterpriseLlmTokenTransport,
+  issueEnterpriseLlmToken,
+} from './enterprise-llm-tokens.ts'
+import {
+  readEnterpriseTokens,
+} from './enterprise-token-store.ts'
+import {
+  resolveEnterpriseGatewayPreset,
+} from './enterprise-gateway-preset.ts'
 import {
   DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE,
   type DesktopNotificationSettings,
@@ -568,7 +582,11 @@ async function start(): Promise<void> {
 
     startupStage = 'runtime-bootstrap'
     lifecycleRecorder.transitionStartupStage(startupStage)
-    const environment = loadLayeredEnv(BIN_NAME, process.cwd())
+    // The enterprise launch environment wraps the immutable boot snapshot with
+    // a process-layer override seam: the LLM token chain writes refreshed
+    //代际 tokens there and the Host's per-call credential resolution reads them
+    // on the very next model request (same process, no IPC).
+    const environment = createDesktopEnterpriseLaunchEnvironment(loadLayeredEnv(BIN_NAME, process.cwd()))
     const electronVersion = process.versions.electron
     if (electronVersion === undefined) {
       throw new Error(`${BIN_NAME}: plugin runtime requires the Electron runtime version`)
@@ -892,6 +910,44 @@ async function start(): Promise<void> {
         )
       }
     }
+    // Enterprise LLM token chain (D4-2): one short-lived代际 token per model
+    // route, issued with the OAuth access token and injected hot through the
+    // launch-environment override plus process.env. The refresher instance is
+    // per session: a fresh login (or re-login) starts a new loop, sign-out
+    // stops it and clears both write points.
+    const enterprisePreset = resolveEnterpriseGatewayPreset(process.env)
+    const enterpriseGatewayUrl = enterprisePreset.status === 'ok' ? enterprisePreset.gatewayUrl : undefined
+    let enterpriseLlmRefresher: EnterpriseLlmTokenRefresher | undefined
+    const establishEnterpriseLlmToken = async (): Promise<void> => {
+      if (enterpriseGatewayUrl === undefined) return
+      enterpriseLlmRefresher?.stop()
+      enterpriseLlmRefresher = new EnterpriseLlmTokenRefresher({
+        gatewayUrl: enterpriseGatewayUrl,
+        readAccessToken: async () => (await readEnterpriseTokens(
+          marketUserDataDir,
+          desktopLanHttpsPrivateKeyProtector(),
+        ).catch(() => undefined))?.accessToken,
+        issue: accessToken => issueEnterpriseLlmToken(fetchEnterpriseLlmTokenTransport, {
+          gatewayUrl: enterpriseGatewayUrl,
+          accessToken,
+        }),
+        apply: token => {
+          environment.set('DSH_LLM_TOKEN', token.token)
+          process.env.DSH_LLM_TOKEN = token.token
+        },
+        now: () => Date.now(),
+        log: electronLogger,
+        onUnauthorized: () => { void enterpriseGate?.requestReauth('session-expired') },
+      })
+      enterpriseLlmRefresher.start()
+    }
+    const teardownEnterpriseLlmToken = (): void => {
+      enterpriseLlmRefresher?.stop()
+      enterpriseLlmRefresher = undefined
+      environment.delete('DSH_LLM_TOKEN')
+      delete process.env.DSH_LLM_TOKEN
+    }
+
     // Enterprise gate (D4-1): a missing or expired organization session blocks
     // Host boot behind the login window. The launcher's single-instance lock
     // (R19) routes second-instance activations to this gate's window.
@@ -901,11 +957,18 @@ async function start(): Promise<void> {
       locale: desktopLocaleFromLanguageTag(app.getLocale()),
       platform: runtime.platform,
       protector: desktopLanHttpsPrivateKeyProtector(),
-      openExternal: url => { void shell.openExternal(url).catch(() => undefined) },
+      // Rejections propagate: the login coordinator surfaces "browser
+      // unavailable" immediately instead of the user waiting out the timeout.
+      openExternal: url => shell.openExternal(url),
       copyToClipboard: text => { clipboard.writeText(text) },
       logger: electronLogger,
+      onSessionEstablished: () => establishEnterpriseLlmToken(),
+      onSessionEnded: () => teardownEnterpriseLlmToken(),
     })
-    generation.own(() => { enterpriseGate?.dispose() })
+    generation.own(() => {
+      teardownEnterpriseLlmToken()
+      enterpriseGate?.dispose()
+    })
     const enterpriseResult = await enterpriseGate.run()
     if (enterpriseResult.outcome === 'quit') {
       startupRecoveryController?.dispose()
@@ -1083,11 +1146,16 @@ async function start(): Promise<void> {
           () => releasePackageResolver,
           'dsh-plugin-desktop: profile package resolution',
         )
-        hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment)
+        hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, environment.snapshot)
         hostCtx.provide('desktopBrowserAccess', browserAccess)
         hostCtx.provide('desktopLanHttps', lanHttps)
         hostCtx.provide('desktopRuntime', runtime)
         hostCtx.provide('desktopPnpmBootstrap', desktopPnpmBootstrap)
+        hostCtx.provide('desktopEnterprise', {
+          identity: () => enterpriseGate?.getIdentity(),
+          signout: () => enterpriseGate?.signout() ?? Promise.resolve(),
+          reauth: () => enterpriseGate?.requestReauth('session-expired') ?? Promise.resolve(),
+        })
         await hostCtx.plugin(DesktopActionsService, {
           openTerminal: () => { runtime.openTerminal() },
           requestRestart: () => runtime.requestRestart(),

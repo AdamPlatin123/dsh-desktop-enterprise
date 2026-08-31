@@ -12,6 +12,9 @@ const RENDERER_RELOAD_PATH = '/api/desktop/developer/reload'
 const DEVELOPER_TOOLS_TOGGLE_PATH = '/api/desktop/developer/devtools'
 const UPDATE_CHECK_PATH = '/api/desktop/updates/check'
 const DIAGNOSTICS_EXPORT_PATH = '/api/desktop/diagnostics/export'
+const ENTERPRISE_IDENTITY_PATH = '/api/desktop/enterprise/identity'
+const ENTERPRISE_SIGNOUT_PATH = '/api/desktop/enterprise/signout'
+const ENTERPRISE_REAUTH_PATH = '/api/desktop/enterprise/reauth'
 const MAX_PROFILES = 256
 const MAX_PROFILE_NAME_LENGTH = 255
 const MAX_LAN_URLS = 32
@@ -67,6 +70,31 @@ export interface DesktopRestartAcceptance {
   readonly restartRequired: boolean
 }
 
+/** Renderer-safe organization identity shown in the account area. */
+export interface DesktopEnterpriseIdentityView {
+  readonly username: string
+  readonly role: string
+}
+
+const MAX_IDENTITY_USERNAME_LENGTH = 256
+const MAX_IDENTITY_ROLE_LENGTH = 64
+const IDENTITY_ROLE_PATTERN = /^[a-z][a-z0-9_-]*$/iu
+
+/** Validate the bounded identity projection before it reaches React state. */
+export function parseDesktopEnterpriseIdentityView(value: unknown): DesktopEnterpriseIdentityView {
+  if (!isObject(value)
+    || typeof value.username !== 'string'
+    || value.username.length === 0
+    || value.username.length > MAX_IDENTITY_USERNAME_LENGTH
+    || typeof value.role !== 'string'
+    || value.role.length === 0
+    || value.role.length > MAX_IDENTITY_ROLE_LENGTH
+    || !IDENTITY_ROLE_PATTERN.test(value.role)) {
+    throw new Error('dsh-plugin-desktop: invalid enterprise identity response')
+  }
+  return Object.freeze({ username: value.username, role: value.role })
+}
+
 /** Browser operations consumed by the Desktop settings section. */
 export interface DesktopSettingsApi {
   read(): Promise<DesktopSettingsView>
@@ -81,6 +109,12 @@ export interface DesktopSettingsApi {
   toggleDeveloperTools(): Promise<void>
   checkForUpdates(): Promise<void>
   exportDiagnostics(): Promise<void>
+  /** Read the signed-in organization identity; undefined when signed out. */
+  readEnterpriseIdentity(): Promise<DesktopEnterpriseIdentityView | undefined>
+  /** Revoke, clear, and return to the sign-in window. */
+  signOut(): Promise<void>
+  /** Reopen the sign-in window behind the session-expired notice. */
+  requestReauth(): Promise<void>
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -346,6 +380,23 @@ export function createDesktopSettingsApi(fetcher: FetchLike = globalThis.fetch.b
     async exportDiagnostics() {
       parseDesktopActionAcceptance(await readResponse(await post(fetcher, DIAGNOSTICS_EXPORT_PATH, {})))
     },
+    async readEnterpriseIdentity() {
+      const response = await fetcher(ENTERPRISE_IDENTITY_PATH, {
+        method: 'GET',
+        credentials: 'same-origin',
+        redirect: 'error',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' },
+      })
+      if (response.status === 404) return undefined
+      return parseDesktopEnterpriseIdentityView(await readResponse(response))
+    },
+    async signOut() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, ENTERPRISE_SIGNOUT_PATH, {})))
+    },
+    async requestReauth() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, ENTERPRISE_REAUTH_PATH, {})))
+    },
   })
 }
 
@@ -362,4 +413,7 @@ export const desktopSettingsPaths = Object.freeze({
   developerToolsToggle: DEVELOPER_TOOLS_TOGGLE_PATH,
   updateCheck: UPDATE_CHECK_PATH,
   diagnosticsExport: DIAGNOSTICS_EXPORT_PATH,
+  enterpriseIdentity: ENTERPRISE_IDENTITY_PATH,
+  enterpriseSignout: ENTERPRISE_SIGNOUT_PATH,
+  enterpriseReauth: ENTERPRISE_REAUTH_PATH,
 })

@@ -182,6 +182,7 @@ export class EnterpriseLoginCoordinator {
         clientId: this.deps.clientId,
         code: callback.code,
         codeVerifier: pkce.verifier,
+        redirectUri: listener.redirectUri,
       })
       const now = this.deps.now()
       const schedule = enterpriseTokenSchedule(response.expiresInSeconds, now)
