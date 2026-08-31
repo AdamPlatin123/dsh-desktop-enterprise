@@ -6,7 +6,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import type { EnterpriseIdentity } from './enterprise-identity.ts'
+import { enterpriseRoleBadge, type EnterpriseIdentity } from './enterprise-identity.ts'
 
 /** Read the current identity projection (undefined = no established session). */
 export type DesktopEnterpriseIdentityReader = () => EnterpriseIdentity | undefined
@@ -24,6 +24,15 @@ export interface DesktopEnterpriseSurface {
   readonly signout: () => Promise<void>
   /** Reopen the login window behind the session-expired notice. */
   readonly reauth: () => Promise<void>
+  /**
+   * Absolute admin console URL while the live identity projects an admin and
+   * the gateway preset allows one; undefined otherwise (R22: a member has no
+   * management surface in any form). Composed in main; the renderer only ever
+   * asks for it to be opened.
+   */
+  readonly adminConsoleUrl: () => string | undefined
+  /** Open the admin console in the system browser; rejections propagate (F1). */
+  readonly openAdminConsole: (url: string) => Promise<void>
 }
 
 /**
@@ -61,6 +70,22 @@ export interface DesktopEnterpriseIdentityView {
 export const DESKTOP_ENTERPRISE_IDENTITY_PATH = '/api/desktop/enterprise/identity'
 export const DESKTOP_ENTERPRISE_SIGNOUT_PATH = '/api/desktop/enterprise/signout'
 export const DESKTOP_ENTERPRISE_REAUTH_PATH = '/api/desktop/enterprise/reauth'
+export const DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH = '/api/desktop/enterprise/admin-console'
+
+/**
+ * R22 admin entry: exactly one fixed `/admin` deep link off the gateway
+ * origin, composed only while the live identity projects an admin. There is
+ * deliberately no probing and no second link — deployment topology is the
+ * server-side admin console's concern.
+ */
+export function enterpriseAdminConsoleUrl(
+  gatewayUrl: string | undefined,
+  identity: EnterpriseIdentity | undefined,
+): string | undefined {
+  if (gatewayUrl === undefined) return undefined
+  if (identity === undefined || enterpriseRoleBadge(identity.role) !== 'admin') return undefined
+  return new URL('/admin', gatewayUrl).toString()
+}
 
 function finishJson(res: ServerResponse, statusCode: number, value: object, allow?: 'GET' | 'POST'): void {
   res.statusCode = statusCode
@@ -193,4 +218,36 @@ export function handleDesktopEnterpriseReauthRequest(
   surface: DesktopEnterpriseSurface,
 ): Promise<void> {
   return handleDesktopEnterpriseActionRequest(req, res, expectedOrigin, surface.reauth)
+}
+
+/**
+ * Open the organization admin console in the system browser. The URL is fixed
+ * by main (gateway preset + /admin for an admin identity), so the renderer
+ * cannot influence the target. Unlike the sign-out/re-login actions, a failed
+ * browser open is NOT acknowledged: the rejection propagates as 502 so the
+ * settings page surfaces the failure instead of a silent no-op (the F1 lesson
+ * from the login gate).
+ */
+export async function handleDesktopEnterpriseAdminConsoleRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  expectedOrigin: string,
+  surface: DesktopEnterpriseSurface,
+): Promise<void> {
+  if (req.method !== 'POST') return finishJson(res, 405, error('method not allowed'), 'POST')
+  if (!isSameOriginEnterpriseRequest(req, expectedOrigin, true)) {
+    return finishJson(res, 403, error('forbidden'))
+  }
+  const declaredLength = req.headers['content-length']
+  if (declaredLength !== undefined && declaredLength !== '0') {
+    return finishJson(res, 400, error('this endpoint takes no request body'))
+  }
+  const url = surface.adminConsoleUrl()
+  if (url === undefined) return finishJson(res, 404, error('no admin console for this identity'))
+  try {
+    await surface.openAdminConsole(url)
+  } catch {
+    return finishJson(res, 502, error('the system browser could not be opened'))
+  }
+  finishJson(res, 202, { accepted: true })
 }

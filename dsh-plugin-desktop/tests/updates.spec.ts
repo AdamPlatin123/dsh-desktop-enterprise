@@ -650,6 +650,8 @@ describe('desktop update enterprise compliance', () => {
         sessionValid: () => true,
         signout: async () => {},
         reauth: async () => {},
+        adminConsoleUrl: () => undefined,
+        openAdminConsole: async () => {},
       },
       request,
     })
@@ -689,6 +691,8 @@ describe('desktop update enterprise compliance', () => {
         sessionValid: () => false,
         signout: async () => {},
         reauth: async () => {},
+        adminConsoleUrl: () => undefined,
+        openAdminConsole: async () => {},
       },
     })
     const req = { headers: {} } as IncomingMessage

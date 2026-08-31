@@ -15,6 +15,7 @@ import {
 } from '../src/client/ExtendedTitlebar.tsx'
 import {
   desktopBrowserUrlsShouldRender,
+  enterpriseAdminEntryVisible,
   DesktopSettingsSection,
   persistDesktopBrowserAccessHot,
   persistDesktopNetworkExposureHot,
@@ -451,6 +452,54 @@ describe('Desktop settings API', () => {
     const api = createDesktopSettingsApi(async () => json({ error: '/Users/private/profile failed' }, 400))
     await expect(api.read()).rejects.toThrow('Desktop settings request failed (400)')
     await expect(api.read()).rejects.not.toThrow('/Users/private')
+  })
+})
+
+describe('Desktop account admin entry (R22)', () => {
+  const ADMIN = { username: 'alice', role: 'admin' }
+  const MEMBER = { username: 'bob', role: 'member' }
+
+  it('shows the admin console entry only while the projected identity is an admin', () => {
+    expect(enterpriseAdminEntryVisible(ADMIN)).toBe(true)
+    expect(enterpriseAdminEntryVisible(MEMBER)).toBe(false)
+    expect(enterpriseAdminEntryVisible({ username: 'carol', role: 'owner' })).toBe(false)
+    expect(enterpriseAdminEntryVisible(undefined)).toBe(false)
+  })
+
+  it('drops the entry when a refresh demotes admin to member', () => {
+    // The account area re-projects the live identity on refresh, so a revoked
+    // role removes the entry without any extra desktop-side state.
+    expect(enterpriseAdminEntryVisible(ADMIN)).toBe(true)
+    expect(enterpriseAdminEntryVisible({ ...ADMIN, role: 'member' })).toBe(false)
+  })
+
+  it('opens the admin console through the strict same-origin enterprise route', async () => {
+    const fetcher = vi.fn(async () => json({ accepted: true }))
+    const api = createDesktopSettingsApi(fetcher)
+    await expect(api.openAdminConsole()).resolves.toBeUndefined()
+    expect(fetcher).toHaveBeenCalledOnce()
+    const [path, init] = fetcher.mock.calls[0] as unknown as [string, RequestInit]
+    expect(path).toBe(desktopSettingsPaths.enterpriseAdminConsole)
+    expect(path).toBe('/api/desktop/enterprise/admin-console')
+    expect(init).toMatchObject({
+      method: 'POST',
+      credentials: 'same-origin',
+      redirect: 'error',
+      body: JSON.stringify({}),
+    })
+  })
+
+  it('surfaces a failed browser open instead of a silent no-op', async () => {
+    const api = createDesktopSettingsApi(async () => json({ error: 'the system browser could not be opened' }, 502))
+    await expect(api.openAdminConsole()).rejects.toThrow('Desktop settings request failed (502)')
+  })
+
+  it('labels the entry bilingually and annotates the external open', () => {
+    expect(zh.adminConsole).toBe('管理控制台')
+    expect(en.adminConsole).toBe('Admin console')
+    expect(zh.adminConsoleHint).toContain('在浏览器中打开')
+    expect(en.adminConsoleHint).toMatch(/open/iu)
+    expect(en.adminConsoleHint).toMatch(/browser/iu)
   })
 })
 

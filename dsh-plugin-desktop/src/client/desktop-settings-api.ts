@@ -15,6 +15,7 @@ const DIAGNOSTICS_EXPORT_PATH = '/api/desktop/diagnostics/export'
 const ENTERPRISE_IDENTITY_PATH = '/api/desktop/enterprise/identity'
 const ENTERPRISE_SIGNOUT_PATH = '/api/desktop/enterprise/signout'
 const ENTERPRISE_REAUTH_PATH = '/api/desktop/enterprise/reauth'
+const ENTERPRISE_ADMIN_CONSOLE_PATH = '/api/desktop/enterprise/admin-console'
 const MAX_PROFILES = 256
 const MAX_PROFILE_NAME_LENGTH = 255
 const MAX_LAN_URLS = 32
@@ -115,6 +116,12 @@ export interface DesktopSettingsApi {
   signOut(): Promise<void>
   /** Reopen the sign-in window behind the session-expired notice. */
   requestReauth(): Promise<void>
+  /**
+   * Open the organization admin console in the system browser. Main composes
+   * the fixed URL; the entry is only offered for an admin identity, and the
+   * route fails closed for everyone else.
+   */
+  openAdminConsole(): Promise<void>
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -397,6 +404,9 @@ export function createDesktopSettingsApi(fetcher: FetchLike = globalThis.fetch.b
     async requestReauth() {
       parseDesktopActionAcceptance(await readResponse(await post(fetcher, ENTERPRISE_REAUTH_PATH, {})))
     },
+    async openAdminConsole() {
+      parseDesktopActionAcceptance(await readResponse(await post(fetcher, ENTERPRISE_ADMIN_CONSOLE_PATH, {})))
+    },
   })
 }
 
@@ -416,4 +426,5 @@ export const desktopSettingsPaths = Object.freeze({
   enterpriseIdentity: ENTERPRISE_IDENTITY_PATH,
   enterpriseSignout: ENTERPRISE_SIGNOUT_PATH,
   enterpriseReauth: ENTERPRISE_REAUTH_PATH,
+  enterpriseAdminConsole: ENTERPRISE_ADMIN_CONSOLE_PATH,
 })

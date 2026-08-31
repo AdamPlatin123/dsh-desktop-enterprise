@@ -42,8 +42,8 @@ git diff --name-status <上游pin>..HEAD
 
 | 文件 | 侵入内容（以锚字符串定位，行号为 15.3 收官时点） |
 | --- | --- |
-| `src/main.ts` | ① 企业模块 import 段（约 154-171 行，锚 `from './enterprise-gate.ts'`）；② `let enterpriseGate` 声明（约 365 行）；③ 企业更新源解析 `const updatePreset = resolveEnterpriseUpdatePreset()`（约 457-460 行）并传入 Electron 运行时构造；④ 全屏可用性探测 `if (enterpriseGate?.showSurface()) return true`（约 542 行）；⑤ 启动环境包装 `const environment = createDesktopEnterpriseLaunchEnvironment(loadLayeredEnv(BIN_NAME, process.cwd()))`（约 593-597 行，**package.spec 启动顺序锚**，见第 4 节）；⑥ LLM 代际令牌链 `resolveEnterpriseGatewayPreset(process.env)` / `EnterpriseLlmTokenRefresher` 建立/拆除（约 921-961 行）；⑦ 企业门构造与 `enterpriseGate.run()` 维护循环（约 966-994 行）；⑧ `desktopEnterprise` provider（`identity`/`sessionValid`/`signout`/`reauth`，约 1169-1173 行） |
-| `src/index.ts` | 企业路由注册（`/api/desktop/enterprise/identity`、`/signout`、`/reauth` 三元组）+ `rejectDesktopRequest` 中的 `enterpriseSessionRejection` 企业会话栅栏层 |
+| `src/main.ts` | ① 企业模块 import 段（约 154-171 行，锚 `from './enterprise-gate.ts'`）；② `let enterpriseGate` 声明（约 365 行）；③ 企业更新源解析 `const updatePreset = resolveEnterpriseUpdatePreset()`（约 457-460 行）并传入 Electron 运行时构造；④ 全屏可用性探测 `if (enterpriseGate?.showSurface()) return true`（约 542 行）；⑤ 启动环境包装 `const environment = createDesktopEnterpriseLaunchEnvironment(loadLayeredEnv(BIN_NAME, process.cwd()))`（约 593-597 行，**package.spec 启动顺序锚**，见第 4 节）；⑥ LLM 代际令牌链 `resolveEnterpriseGatewayPreset(process.env)` / `EnterpriseLlmTokenRefresher` 建立/拆除（约 921-961 行）；⑦ 企业门构造与 `enterpriseGate.run()` 维护循环（约 966-994 行）；⑧ `desktopEnterprise` provider（`identity`/`sessionValid`/`signout`/`reauth`/`adminConsoleUrl`/`openAdminConsole`，约 1169-1176 行） |
+| `src/index.ts` | 企业路由注册（`/api/desktop/enterprise/identity`、`/signout`、`/reauth`、`/admin-console` 四元组）+ `rejectDesktopRequest` 中的 `enterpriseSessionRejection` 企业会话栅栏层 |
 | `src/updates.ts` | `apply()` 先解析更新源预置：关闭则不注册托盘/路由/生命周期直接返回；启用时路由在上游拒绝后追加企业会话栅栏 |
 | `src/update-checker.ts` / `update-download.ts` / `update-lifecycle.ts` | `endpoint` / `downloadUrls` 可选参数化（上游默认值不变，生产行为由预置显式接线） |
 | `src/electron-runtime.ts` | `updateOrigin` 构造参数 → 下载走预置源点的 `downloadUrls`；未预置源点时下载直接抛错（结构性兜底，杜绝回退到公共下载主机） |
@@ -75,7 +75,7 @@ git diff --name-status <上游pin>..HEAD
 ### 3.1 rebase 注意事项（已知脆弱点）
 
 - **启动顺序锚**：`dsh-plugin-desktop/tests/package.spec.ts` 以源码字符串锚断言 `main.ts` 的启动顺序，关键是 `const environment = createDesktopEnterpriseLaunchEnvironment(loadLayeredEnv` （约 352 行附近断言，源点在 `main.ts` 约 597 行）。上游若重排 `main.ts` 启动序列（环境构造、窗口创建、门运行的相对顺序），此处会红——先改锚，不改语义。
-- **路由清单断言**：`tests/plugin.spec.ts` 断言企业路由三元组的注册形状；`updates.spec.ts` 断言"更新源关闭 = 不注册托盘/路由"。上游给设置页/托盘新增路由时，核对这两个断言是否需要扩列。
+- **路由清单断言**：`tests/plugin.spec.ts` 断言企业路由四元组的注册形状；`updates.spec.ts` 断言"更新源关闭 = 不注册托盘/路由"。上游给设置页/托盘新增路由时，核对这两个断言是否需要扩列。
 - **main.ts 侵入点密集**（2.2 表 ⑦⑧ 段落嵌在上游启动流程中），rebase 冲突优先保上游结构、重放企业块，禁止整段覆盖。
 - 更新链（`update-checker` / `update-download` / `updates`）上游演进时，保持 `endpoint` / `downloadUrls` 参数可选且默认值不变——企业预置在生产路径显式接线，上游默认路径必须保持原样，否则外联归零断言会失效。
 

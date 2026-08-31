@@ -58,10 +58,12 @@ import {
 } from './desktop-settings-route.ts'
 import type {} from './desktop-settings-controller.ts'
 import {
+  DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH,
   DESKTOP_ENTERPRISE_IDENTITY_PATH,
   DESKTOP_ENTERPRISE_REAUTH_PATH,
   DESKTOP_ENTERPRISE_SIGNOUT_PATH,
   enterpriseSessionRejection,
+  handleDesktopEnterpriseAdminConsoleRequest,
   handleDesktopEnterpriseIdentityRequest,
   handleDesktopEnterpriseReauthRequest,
   handleDesktopEnterpriseSignoutRequest,
@@ -359,10 +361,13 @@ export function apply(ctx: Context, config: Config): void {
   if (enterpriseSurface !== undefined) {
     // The identity projection is data-plane (fenced); sign-out and re-login
     // stay reachable while the session is invalid — they are the recovery path.
+    // The admin console entry is data-plane too: a revoked or expired session
+    // closes it like every other fenced route.
     const enterpriseRoutes = [
       [DESKTOP_ENTERPRISE_IDENTITY_PATH, handleDesktopEnterpriseIdentityRequest, false],
       [DESKTOP_ENTERPRISE_SIGNOUT_PATH, handleDesktopEnterpriseSignoutRequest, true],
       [DESKTOP_ENTERPRISE_REAUTH_PATH, handleDesktopEnterpriseReauthRequest, true],
+      [DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH, handleDesktopEnterpriseAdminConsoleRequest, false],
     ] as const
     for (const [path, handler, allowWhenSessionInvalid] of enterpriseRoutes) {
       ctx.effect(

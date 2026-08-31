@@ -25,6 +25,7 @@ import {
   DESKTOP_DIRECTORY_VALIDATOR_PATH,
 } from '../src/directory-picker-contract.ts'
 import {
+  DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH,
   DESKTOP_ENTERPRISE_IDENTITY_PATH,
   DESKTOP_ENTERPRISE_REAUTH_PATH,
   DESKTOP_ENTERPRISE_SIGNOUT_PATH,
@@ -82,6 +83,8 @@ interface PluginHarness {
     readonly sessionValid: () => boolean
     readonly signout: ReturnType<typeof vi.fn<() => Promise<void>>>
     readonly reauth: ReturnType<typeof vi.fn<() => Promise<void>>>
+    readonly adminConsoleUrl: () => string | undefined
+    readonly openAdminConsole: ReturnType<typeof vi.fn<(url: string) => Promise<void>>>
   }
   setEnterpriseSessionValid(value: boolean): void
   route(path: string): WebRoute | undefined
@@ -115,6 +118,8 @@ function createHarness(
     sessionValid: () => enterpriseSessionValid,
     signout: vi.fn(async () => {}),
     reauth: vi.fn(async () => {}),
+    adminConsoleUrl: () => undefined,
+    openAdminConsole: vi.fn(async () => {}),
   }
   let localePreference: LocaleId | undefined
   let themePreference: ThemePreference = 'system'
@@ -431,6 +436,7 @@ describe('desktop Host plugin', () => {
       DESKTOP_ENTERPRISE_IDENTITY_PATH,
       DESKTOP_ENTERPRISE_SIGNOUT_PATH,
       DESKTOP_ENTERPRISE_REAUTH_PATH,
+      DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH,
     ].sort()
     const routes = harness.routes()
     expect(routes.map(route => route.path).sort()).toEqual(expectedPaths)

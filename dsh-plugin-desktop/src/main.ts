@@ -167,6 +167,9 @@ import {
   resolveEnterpriseGatewayPreset,
 } from './enterprise-gateway-preset.ts'
 import {
+  enterpriseAdminConsoleUrl,
+} from './enterprise-desktop-routes.ts'
+import {
   resolveEnterpriseUpdatePreset,
 } from './enterprise-update-preset.ts'
 import {
@@ -1171,6 +1174,11 @@ async function start(): Promise<void> {
           sessionValid: () => enterpriseGate?.isSessionValid() === true,
           signout: () => enterpriseGate?.signout() ?? Promise.resolve(),
           reauth: () => enterpriseGate?.requestReauth('session-expired') ?? Promise.resolve(),
+          // R22 admin entry: the fixed /admin deep link is composed here from
+          // the gateway preset and the live identity, so the renderer can only
+          // ask for it to be opened — never choose the target.
+          adminConsoleUrl: () => enterpriseAdminConsoleUrl(enterpriseGatewayUrl, enterpriseGate?.getIdentity()),
+          openAdminConsole: url => shell.openExternal(url),
         })
         await hostCtx.plugin(DesktopActionsService, {
           openTerminal: () => { runtime.openTerminal() },

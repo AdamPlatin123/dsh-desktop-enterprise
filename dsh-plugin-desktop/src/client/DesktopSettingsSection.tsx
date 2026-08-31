@@ -53,7 +53,7 @@ export type DesktopSettingsSectionProps =
   & InjectFace<DesktopSettingsSectionInjected>
 
 type Translate = DesktopSettingsSectionProps['t']
-type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-market' | 'mode' | 'material' | 'web' | 'notification' | 'signout'
+type BusyOperation = 'load' | 'create-profile' | 'select-profile' | 'delete-profile' | 'select-market' | 'mode' | 'material' | 'web' | 'notification' | 'signout' | 'admin-console'
 type RestartState = 'none' | 'restarting' | 'required'
 type IdentityState = 'loading' | 'ready' | 'unavailable' | 'signed-out'
 type LanPollWait = (signal: AbortSignal) => Promise<void>
@@ -270,6 +270,15 @@ export function enterpriseRoleBadge(role: string): 'admin' | 'member' {
   return role === 'admin' ? 'admin' : 'member'
 }
 
+/**
+ * R22: the account area carries exactly one admin entry, visible only while
+ * the projected identity is an admin. A role revoked server-side disappears
+ * on the next identity refresh without any extra state.
+ */
+export function enterpriseAdminEntryVisible(identity: DesktopEnterpriseIdentityView | undefined): boolean {
+  return identity !== undefined && enterpriseRoleBadge(identity.role) === 'admin'
+}
+
 const MARKET_OPTIONS: readonly {
   id: DesktopMarketProvider
   title: DesktopSettingsLocaleKey
@@ -348,6 +357,14 @@ export function DesktopSettingsSection({
       await api.signOut()
       setIdentity(undefined)
       setIdentityState('signed-out')
+    })
+  }
+
+  // Main composes the fixed gateway /admin URL; a failed browser open
+  // propagates here as a rejected request and surfaces the shared error line.
+  const openAdminConsole = (): void => {
+    void run('admin-console', async () => {
+      await api.openAdminConsole()
     })
   }
 
@@ -814,14 +831,28 @@ export function DesktopSettingsSection({
                   </span>
                 </span>
               </span>
-              <button
-                type="button"
-                className="dshDesktopSettingsButton dshDesktopSettingsButtonSecondary"
-                disabled={busy !== undefined}
-                onClick={signOut}
-              >
-                {busy === 'signout' ? t('signingOut') : t('signOut')}
-              </button>
+              <span className="dshDesktopSettingsAccountActions">
+                {enterpriseAdminEntryVisible(identity) && (
+                  <button
+                    type="button"
+                    className="dshDesktopSettingsButton dshDesktopSettingsButtonSecondary"
+                    title={t('adminConsoleHint')}
+                    aria-label={`${t('adminConsole')} — ${t('adminConsoleHint')}`}
+                    disabled={busy !== undefined}
+                    onClick={openAdminConsole}
+                  >
+                    {t('adminConsole')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="dshDesktopSettingsButton dshDesktopSettingsButtonSecondary"
+                  disabled={busy !== undefined}
+                  onClick={signOut}
+                >
+                  {busy === 'signout' ? t('signingOut') : t('signOut')}
+                </button>
+              </span>
             </div>
           </div>
         )}

@@ -2,10 +2,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH,
   DESKTOP_ENTERPRISE_IDENTITY_PATH,
   DESKTOP_ENTERPRISE_REAUTH_PATH,
   DESKTOP_ENTERPRISE_SIGNOUT_PATH,
+  enterpriseAdminConsoleUrl,
   enterpriseSessionRejection,
+  handleDesktopEnterpriseAdminConsoleRequest,
   handleDesktopEnterpriseIdentityRequest,
   handleDesktopEnterpriseReauthRequest,
   handleDesktopEnterpriseSignoutRequest,
@@ -56,7 +59,9 @@ function surface(overrides: Partial<DesktopEnterpriseSurface> = {}): DesktopEnte
   const sessionValid = vi.fn(() => true)
   const signout = vi.fn(async () => {})
   const reauth = vi.fn(async () => {})
-  return { identity, sessionValid, signout, reauth, ...overrides }
+  const adminConsoleUrl = vi.fn(() => 'https://gateway.example.com/admin')
+  const openAdminConsole = vi.fn(async () => {})
+  return { identity, sessionValid, signout, reauth, adminConsoleUrl, openAdminConsole, ...overrides }
 }
 
 describe('desktop enterprise HTTP boundary', () => {
@@ -186,10 +191,86 @@ describe('desktop enterprise HTTP boundary', () => {
     expect(isSameOriginEnterpriseRequest(wrongHost, ORIGIN, false)).toBe(false)
   })
 
-  it('exports the three private route paths', () => {
+  it('exports the four private route paths', () => {
     expect(DESKTOP_ENTERPRISE_IDENTITY_PATH).toBe('/api/desktop/enterprise/identity')
     expect(DESKTOP_ENTERPRISE_SIGNOUT_PATH).toBe('/api/desktop/enterprise/signout')
     expect(DESKTOP_ENTERPRISE_REAUTH_PATH).toBe('/api/desktop/enterprise/reauth')
+    expect(DESKTOP_ENTERPRISE_ADMIN_CONSOLE_PATH).toBe('/api/desktop/enterprise/admin-console')
+  })
+})
+
+describe('role-driven admin console entry (R22)', () => {
+  it('opens the fixed gateway /admin deep link for an admin and acknowledges it', async () => {
+    const openAdminConsole = vi.fn<(url: string) => Promise<void>>(async () => {})
+    const enterprise = surface({
+      adminConsoleUrl: vi.fn(() => 'https://gateway.example.com/admin'),
+      openAdminConsole,
+    })
+    const res = response()
+    await handleDesktopEnterpriseAdminConsoleRequest(
+      request('POST', { headers: { 'content-length': '0' } }), res, ORIGIN, enterprise,
+    )
+    expect(res.statusCode).toBe(202)
+    expect(JSON.parse(res.body)).toEqual({ accepted: true })
+    expect(enterprise.adminConsoleUrl).toHaveBeenCalledOnce()
+    expect(openAdminConsole).toHaveBeenCalledOnce()
+    expect(openAdminConsole.mock.calls[0]?.[0]).toBe('https://gateway.example.com/admin')
+  })
+
+  it('composes the admin URL from the gateway preset origin only', () => {
+    expect(enterpriseAdminConsoleUrl('https://gateway.example.com', { username: 'alice', role: 'admin' }))
+      .toBe('https://gateway.example.com/admin')
+    expect(enterpriseAdminConsoleUrl('https://gateway.example.com/', { username: 'alice', role: 'admin' }))
+      .toBe('https://gateway.example.com/admin')
+  })
+
+  it('never composes an admin URL for a member, an unknown role, a signed-out session, or a missing preset', () => {
+    const gateway = 'https://gateway.example.com'
+    expect(enterpriseAdminConsoleUrl(gateway, { username: 'bob', role: 'member' })).toBeUndefined()
+    expect(enterpriseAdminConsoleUrl(gateway, { username: 'carol', role: 'owner' })).toBeUndefined()
+    expect(enterpriseAdminConsoleUrl(gateway, undefined)).toBeUndefined()
+    expect(enterpriseAdminConsoleUrl(undefined, { username: 'alice', role: 'admin' })).toBeUndefined()
+  })
+
+  it('reflects a role revoked after refresh: the URL disappears and the route refuses fail-closed', async () => {
+    const revoked = surface({
+      adminConsoleUrl: vi.fn(() => enterpriseAdminConsoleUrl('https://gateway.example.com', { username: 'alice', role: 'member' })),
+    })
+    const res = response()
+    await handleDesktopEnterpriseAdminConsoleRequest(request('POST'), res, ORIGIN, revoked)
+    expect(res.statusCode).toBe(404)
+    expect(revoked.openAdminConsole).not.toHaveBeenCalled()
+  })
+
+  it('propagates a failed browser open as 502 instead of a fake acceptance', async () => {
+    const enterprise = surface({ openAdminConsole: vi.fn(async () => { throw new Error('xdg-open missing') }) })
+    const res = response()
+    await handleDesktopEnterpriseAdminConsoleRequest(request('POST'), res, ORIGIN, enterprise)
+    expect(res.statusCode).toBe(502)
+    expect(JSON.parse(res.body)).toEqual({ error: 'the system browser could not be opened' })
+  })
+
+  it('keeps the admin route GET-free, cross-origin-free, and body-free', async () => {
+    const enterprise = surface()
+
+    const wrongMethod = response()
+    await handleDesktopEnterpriseAdminConsoleRequest(request('GET'), wrongMethod, ORIGIN, enterprise)
+    expect(wrongMethod.statusCode).toBe(405)
+    expect(res_allow(wrongMethod)).toBe('POST')
+
+    const crossOrigin = response()
+    await handleDesktopEnterpriseAdminConsoleRequest(
+      request('POST', { headers: { origin: 'https://example.com' } }), crossOrigin, ORIGIN, enterprise,
+    )
+    expect(crossOrigin.statusCode).toBe(403)
+    expect(enterprise.openAdminConsole).not.toHaveBeenCalled()
+
+    const withBody = response()
+    await handleDesktopEnterpriseAdminConsoleRequest(
+      request('POST', { body: '{"x":1}', headers: { 'content-length': '6' } }), withBody, ORIGIN, enterprise,
+    )
+    expect(withBody.statusCode).toBe(400)
+    expect(enterprise.openAdminConsole).not.toHaveBeenCalled()
   })
 })
 
