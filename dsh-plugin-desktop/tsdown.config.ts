@@ -2,9 +2,21 @@ import { defineConfig } from 'tsdown'
 
 const PACKAGE_NAME = 'dsh-plugin-desktop'
 
+/**
+ * Enterprise gateway preset (R15): baked from the build environment. Empty
+ * strings mean "not preset"; the enterprise gate then routes to the explicit
+ * misconfiguration page instead of offering a manual input. Development and
+ * tests override at runtime through the documented environment variables.
+ */
+const enterpriseDefines = {
+  __DSH_ENTERPRISE_GATEWAY_URL__: JSON.stringify(process.env.DSH_ENTERPRISE_GATEWAY_URL ?? ''),
+  __DSH_ENTERPRISE_OAUTH_CLIENT_ID__: JSON.stringify(process.env.DSH_ENTERPRISE_OAUTH_CLIENT_ID ?? ''),
+}
+
 export default defineConfig([
   {
     name: PACKAGE_NAME,
+    define: enterpriseDefines,
     entry: {
       index: 'src/index.ts',
       'module-resolution': 'src/module-resolution.ts',

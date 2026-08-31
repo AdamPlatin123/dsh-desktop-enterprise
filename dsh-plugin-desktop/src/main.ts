@@ -1,6 +1,6 @@
 /** DSH Desktop executable: minimal Electron bootstrap around the Host Cordis root. */
 
-import { app, crashReporter, safeStorage, shell } from 'electron'
+import { app, clipboard, crashReporter, safeStorage, shell } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -151,6 +151,7 @@ import {
 import type { RendererBootReport } from './renderer-boot-contract.ts'
 import { desktopLocaleFromLanguageTag } from './tray-locale.ts'
 import { desktopNativeCopy } from './native-dialog-copy.ts'
+import { DesktopEnterpriseGate } from './enterprise-gate.ts'
 import {
   DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE,
   type DesktopNotificationSettings,
@@ -344,6 +345,7 @@ async function start(): Promise<void> {
   let startupRecoveryController: DesktopStartupRecoveryController | undefined
   let startupRecoveryWindow: DesktopStartupRecoveryWindow | undefined
   let setupWizardWindow: DesktopSetupWizardWindow | undefined
+  let enterpriseGate: DesktopEnterpriseGate | undefined
   let startupRecoveryConfigurationPaths: DesktopStartupRecoveryConfigurationPaths | undefined
   let profileCheckpoint: DesktopProfileCheckpoint | undefined
   let startupRecoveryProfileActions: DesktopStartupRecoveryProfileActions | undefined
@@ -515,6 +517,7 @@ async function start(): Promise<void> {
       startupRecoveryWindow.show()
       return true
     }
+    if (enterpriseGate?.showSurface()) return true
     return false
   }
   app.on('activate', () => { showPreHostSurface() })
@@ -889,6 +892,28 @@ async function start(): Promise<void> {
         )
       }
     }
+    // Enterprise gate (D4-1): a missing or expired organization session blocks
+    // Host boot behind the login window. The launcher's single-instance lock
+    // (R19) routes second-instance activations to this gate's window.
+    enterpriseGate = new DesktopEnterpriseGate({
+      userDataDir: marketUserDataDir,
+      homeDir,
+      locale: desktopLocaleFromLanguageTag(app.getLocale()),
+      platform: runtime.platform,
+      protector: desktopLanHttpsPrivateKeyProtector(),
+      openExternal: url => { void shell.openExternal(url).catch(() => undefined) },
+      copyToClipboard: text => { clipboard.writeText(text) },
+      logger: electronLogger,
+    })
+    generation.own(() => { enterpriseGate?.dispose() })
+    const enterpriseResult = await enterpriseGate.run()
+    if (enterpriseResult.outcome === 'quit') {
+      startupRecoveryController?.dispose()
+      startupRecoveryController = undefined
+      await shutdown.request(0)
+      return
+    }
+    enterpriseGate.startMaintenance()
     if (profileCheckpoint === undefined) {
       try {
         profileCheckpoint = new DesktopProfileCheckpoint({

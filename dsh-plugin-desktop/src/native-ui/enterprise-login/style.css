@@ -1,0 +1,156 @@
+/* Enterprise login window: minimal standalone styles (no framework, CSP 'self'). */
+
+:root {
+  color-scheme: dark;
+  --background: #202124;
+  --surface: #2b2c2f;
+  --border: #3c4043;
+  --foreground: #e8eaed;
+  --muted: #9aa0a6;
+  --primary: #8ab4f8;
+  --primary-text: #202124;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+#root {
+  height: 100%;
+  display: flex;
+}
+
+.page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.5rem 1.75rem 1rem;
+  overflow-y: auto;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+  height: 1.75rem;
+  margin: -1.5rem -1.75rem 0.25rem;
+  flex: none;
+}
+
+.heading {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.server-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.server-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.server-origin {
+  font-size: 1rem;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.server-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.notice {
+  border: 1px solid var(--primary);
+  border-radius: 0.5rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+}
+
+.view-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0.25rem 0 0;
+}
+
+.view-body {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.detail {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.btn {
+  -webkit-app-region: no-drag;
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground);
+  border-radius: 0.5rem;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: var(--primary);
+}
+
+.btn.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-text);
+  font-weight: 600;
+}
+
+.countdown {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.disclosure {
+  margin-top: auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+}

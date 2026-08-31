@@ -23,6 +23,7 @@ export default defineConfig({
         recovery: resolve(uiRoot, 'recovery.html'),
         'profile-create': resolve(uiRoot, 'profile-create.html'),
         'setup-wizard': resolve(uiRoot, 'setup-wizard.html'),
+        'enterprise-login': resolve(uiRoot, 'enterprise-login.html'),
       },
     },
   },
