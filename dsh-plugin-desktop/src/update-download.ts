@@ -31,6 +31,20 @@ export type UpdateDownloadErrorCode =
 /** Fetch-compatible request boundary supplied by the Electron adapter or a test. */
 export type UpdateArtifactRequest = (url: string, init: RequestInit) => Promise<Response>
 
+/**
+ * Derive the platform download endpoints below one self-hosted update source
+ * origin. The paths mirror the documented official-service contract so a
+ * private mirror only needs to serve the same layout.
+ */
+export function desktopUpdateDownloadUrlsForOrigin(
+  origin: string,
+): Readonly<Record<DesktopDownloadPlatform, string>> {
+  return Object.freeze({
+    darwin: `${origin}/api/downloads/mac`,
+    win32: `${origin}/api/downloads/windows`,
+  })
+}
+
 /** Inputs for one user-confirmed installer download. */
 export interface DownloadDesktopUpdateOptions {
   /** Host platform selecting the fixed endpoint and installer validation. */
@@ -43,6 +57,12 @@ export interface DownloadDesktopUpdateOptions {
   readonly request: UpdateArtifactRequest
   /** Optional cancellation signal owned by the update coordinator. */
   readonly signal?: AbortSignal
+  /**
+   * Platform download endpoints to use. Enterprise deployments pass their
+   * preset self-hosted mirror; when omitted the fixed official endpoints are
+   * used, and the enterprise wiring only reaches a download with a preset.
+   */
+  readonly downloadUrls?: Readonly<Record<DesktopDownloadPlatform, string>>
 }
 
 /** Typed failure from installer request, validation, or cancellation. */
@@ -110,7 +130,7 @@ export async function downloadDesktopUpdate(options: DownloadDesktopUpdateOption
 
   let response: Response
   try {
-    response = await options.request(DESKTOP_DOWNLOAD_URLS[platform], {
+    response = await options.request(options.downloadUrls?.[platform] ?? DESKTOP_DOWNLOAD_URLS[platform], {
       method: 'GET',
       cache: 'no-store',
       redirect: 'follow',

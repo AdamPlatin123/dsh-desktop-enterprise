@@ -14,6 +14,8 @@ import type {
   DesktopRuntime,
   DesktopTrayItem,
 } from '../src/runtime.ts'
+import { ENTERPRISE_UPDATE_URL_OVERRIDE } from '../src/enterprise-update-preset.ts'
+import type { DesktopEnterpriseSurface } from '../src/enterprise-desktop-routes.ts'
 import type { UpdateCheckResult } from '../src/update-checker.ts'
 import { apply, Config, inject, type Config as UpdateConfig } from '../src/updates.ts'
 
@@ -45,6 +47,13 @@ interface Harness {
   dispose(): Promise<void>
 }
 
+const TEST_UPDATE_ORIGIN = 'http://update.test'
+
+function setUpdatePresetEnv(origin: string | undefined): void {
+  if (origin === undefined) delete process.env[ENTERPRISE_UPDATE_URL_OVERRIDE]
+  else process.env[ENTERPRISE_UPDATE_URL_OVERRIDE] = origin
+}
+
 async function createHarness(options: {
   readonly packaged?: boolean
   readonly canDownload?: boolean
@@ -56,6 +65,10 @@ async function createHarness(options: {
   readonly notify?: (notification: DesktopNotification) => void
   readonly locale?: DesktopRuntime['locale']
   readonly state?: string
+  /** Preset update source; the string 'disabled' runs with no preset at all. */
+  readonly preset?: 'disabled' | string
+  /** Enterprise surface reported by ctx.get('desktopEnterprise'). */
+  readonly enterpriseSurface?: DesktopEnterpriseSurface
 } = {}): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-updates-'))
   const statePath = join(root, 'private', 'state.json')
@@ -105,18 +118,31 @@ async function createHarness(options: {
     },
     connection: { requestRejection },
     logger: { warn: (...args: unknown[]) => { warnings.push(args) } },
+    get: () => options.enterpriseSurface,
     effect: (register: () => (() => void | Promise<void>)) => {
       disposer = register()
       return disposer
     },
   } as unknown as Context
 
-  apply(ctx, options.config ?? testConfig)
-  if (tray === undefined) throw new Error('Update tray item was not registered.')
-  if (route === undefined) throw new Error('Update route was not registered.')
+  const previousPreset = process.env[ENTERPRISE_UPDATE_URL_OVERRIDE]
+  setUpdatePresetEnv(options.preset === 'disabled'
+    ? undefined
+    : options.preset === 'invalid'
+      ? 'not a url'
+      : options.preset ?? TEST_UPDATE_ORIGIN)
+  try {
+    apply(ctx, options.config ?? testConfig)
+  } finally {
+    setUpdatePresetEnv(previousPreset)
+  }
+  if (options.preset !== 'disabled' && options.preset !== 'invalid') {
+    if (tray === undefined) throw new Error('Update tray item was not registered.')
+    if (route === undefined) throw new Error('Update route was not registered.')
+  }
   return {
     statePath,
-    tray,
+    tray: tray as DesktopTrayItem,
     notifications,
     warnings,
     confirmDownload,
@@ -125,7 +151,7 @@ async function createHarness(options: {
     refresh,
     registrationDispose,
     requestRejection,
-    route,
+    route: route as WebRoute,
     dispose: async () => { await disposer?.() },
   }
 }
@@ -569,5 +595,112 @@ describe('desktop update Host plugin', () => {
     expect(harness.notifications).toEqual([])
     expect(harness.warnings).toEqual([])
     expect(harness.tray.label()).toBe('Check for Updates…')
+  })
+})
+
+describe('desktop update enterprise compliance', () => {
+  it('registers no tray command, route, or lifecycle when no update source is preset', async () => {
+    vi.useFakeTimers()
+    const request = vi.fn(async () => versionResponse('2.1.0'))
+    const harness = await createHarness({ preset: 'disabled', request })
+
+    expect(harness.warnings).toEqual([[
+      'dsh-plugin-desktop: no self-hosted update source is preset; Desktop update checks stay disabled',
+    ]])
+    await vi.advanceTimersByTimeAsync(testConfig.intervalMs * 2)
+    expect(request).not.toHaveBeenCalled()
+    expect(harness.confirmDownload).not.toHaveBeenCalled()
+    expect(harness.showManualCheckResult).not.toHaveBeenCalled()
+  })
+
+  it('stays disabled, without touching the network, when a preset is invalid', async () => {
+    vi.useFakeTimers()
+    const request = vi.fn(async () => versionResponse('2.1.0'))
+    const harness = await createHarness({
+      preset: 'invalid',
+      request,
+    })
+
+    expect(harness.warnings).toEqual([[
+      'dsh-plugin-desktop: the preset update source is not an absolute URL; Desktop update checks stay disabled',
+    ]])
+    await vi.advanceTimersByTimeAsync(testConfig.intervalMs * 2)
+    expect(request).not.toHaveBeenCalled()
+  })
+
+  it('sends every version check to the preset origin and never to the public endpoint', async () => {
+    vi.useFakeTimers()
+    const request = vi.fn(async (_url: string) => versionResponse('2.1.0'))
+    const harness = await createHarness({ request })
+
+    await vi.advanceTimersByTimeAsync(testConfig.initialDelayMs)
+    await vi.waitFor(() => { expect(request).toHaveBeenCalledOnce() })
+    expect(request.mock.calls[0]?.[0]).toBe(`${TEST_UPDATE_ORIGIN}/api/desktop/version`)
+    expect(String(request.mock.calls[0]?.[0])).not.toContain('dshdesktop.cn')
+    await vi.waitFor(() => { expect(harness.notifications).toHaveLength(1) })
+    expect(harness.warnings).toEqual([])
+  })
+
+  it('keeps the interactive route reachable through the preset origin while a session is valid', async () => {
+    const request = vi.fn(async (_url: string) => versionResponse('2.0.0'))
+    const harness = await createHarness({
+      packaged: false,
+      enterpriseSurface: {
+        identity: () => undefined,
+        sessionValid: () => true,
+        signout: async () => {},
+        reauth: async () => {},
+      },
+      request,
+    })
+    const req = {
+      method: 'POST',
+      headers: {
+        host: '127.0.0.1:43120',
+        origin: 'http://127.0.0.1:43120',
+        'content-type': 'application/json',
+      },
+      socket: { remoteAddress: '127.0.0.1' },
+      async * [Symbol.asyncIterator]() { yield Buffer.from('{}') },
+    } as unknown as IncomingMessage
+    let body = ''
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn((value?: string) => { body = value ?? '' }),
+    } as unknown as ServerResponse
+
+    await harness.route.handler(req, res)
+
+    expect(request).toHaveBeenCalledOnce()
+    expect(request.mock.calls[0]?.[0]).toBe(`${TEST_UPDATE_ORIGIN}/api/desktop/version`)
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(body)).toEqual({ accepted: true })
+    await harness.dispose()
+  })
+
+  it('closes the interactive route with 401 while the enterprise session is invalid', async () => {
+    const request = vi.fn(async () => versionResponse('2.0.0'))
+    const harness = await createHarness({
+      packaged: false,
+      request,
+      enterpriseSurface: {
+        identity: () => undefined,
+        sessionValid: () => false,
+        signout: async () => {},
+        reauth: async () => {},
+      },
+    })
+    const req = { headers: {} } as IncomingMessage
+    const writeHead = vi.fn()
+    const end = vi.fn()
+    const res = { writeHead, end } as unknown as ServerResponse
+
+    await harness.route.handler(req, res)
+
+    expect(writeHead).toHaveBeenCalledWith(401)
+    expect(end).toHaveBeenCalledWith('unauthorized')
+    expect(request).not.toHaveBeenCalled()
+    await harness.dispose()
   })
 })

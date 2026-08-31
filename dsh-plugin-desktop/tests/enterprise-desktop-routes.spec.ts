@@ -5,6 +5,7 @@ import {
   DESKTOP_ENTERPRISE_IDENTITY_PATH,
   DESKTOP_ENTERPRISE_REAUTH_PATH,
   DESKTOP_ENTERPRISE_SIGNOUT_PATH,
+  enterpriseSessionRejection,
   handleDesktopEnterpriseIdentityRequest,
   handleDesktopEnterpriseReauthRequest,
   handleDesktopEnterpriseSignoutRequest,
@@ -52,9 +53,10 @@ function response(): ServerResponse & {
 
 function surface(overrides: Partial<DesktopEnterpriseSurface> = {}): DesktopEnterpriseSurface {
   const identity = vi.fn(() => ({ username: 'alice', role: 'admin' }))
+  const sessionValid = vi.fn(() => true)
   const signout = vi.fn(async () => {})
   const reauth = vi.fn(async () => {})
-  return { identity, signout, reauth, ...overrides }
+  return { identity, sessionValid, signout, reauth, ...overrides }
 }
 
 describe('desktop enterprise HTTP boundary', () => {
@@ -188,6 +190,32 @@ describe('desktop enterprise HTTP boundary', () => {
     expect(DESKTOP_ENTERPRISE_IDENTITY_PATH).toBe('/api/desktop/enterprise/identity')
     expect(DESKTOP_ENTERPRISE_SIGNOUT_PATH).toBe('/api/desktop/enterprise/signout')
     expect(DESKTOP_ENTERPRISE_REAUTH_PATH).toBe('/api/desktop/enterprise/reauth')
+  })
+})
+
+describe('enterprise layer of the local HTTP fence', () => {
+  it('admits requests without an enterprise surface (upstream shape)', () => {
+    expect(enterpriseSessionRejection(undefined, false)).toBeUndefined()
+    expect(enterpriseSessionRejection(undefined, true)).toBeUndefined()
+  })
+
+  it('admits requests while the session affirmatively reports valid', () => {
+    const active = surface()
+    expect(enterpriseSessionRejection(active, false)).toBeUndefined()
+    expect(active.sessionValid).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    false,
+    undefined,
+  ] as const)('rejects fail-closed when sessionValid reports %s', (value) => {
+    const expired = surface({ sessionValid: () => value as boolean })
+    expect(enterpriseSessionRejection(expired, false)).toBe(401)
+  })
+
+  it('keeps the recovery actions reachable while the session is invalid', () => {
+    const expired = surface({ sessionValid: () => false })
+    expect(enterpriseSessionRejection(expired, true)).toBeUndefined()
   })
 })
 

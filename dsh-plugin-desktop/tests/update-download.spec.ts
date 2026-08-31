@@ -6,6 +6,7 @@ import {
   DESKTOP_DOWNLOAD_URLS,
   MAX_UPDATE_DOWNLOAD_BYTES,
   UpdateDownloadError,
+  desktopUpdateDownloadUrlsForOrigin,
   desktopUpdateFilename,
   downloadDesktopUpdate,
   pendingDesktopUpdateArtifact,
@@ -98,6 +99,31 @@ describe('desktop update installer download', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]?.url).toBe(DESKTOP_DOWNLOAD_URLS.darwin)
     expect(calls[0]?.init).toMatchObject({ method: 'GET', cache: 'no-store', redirect: 'follow' })
+    await expectNoPartialFiles(directory)
+  })
+
+  it('downloads from explicit override endpoints when a private mirror is configured', async () => {
+    const directory = await temporaryDirectory()
+    const artifact = dmgArtifact()
+    const calls: Array<{ url: string; init: RequestInit }> = []
+    const request: UpdateArtifactRequest = async (url, init) => {
+      calls.push({ url, init })
+      return chunkedResponse([artifact])
+    }
+
+    const result = await downloadDesktopUpdate({
+      platform: 'darwin',
+      version: '2.1.0',
+      destinationPath: destinationPath(directory, 'darwin', '2.1.0'),
+      request,
+      downloadUrls: desktopUpdateDownloadUrlsForOrigin('https://updates.corp.example'),
+    })
+
+    expect(result).toBe(join(directory, 'DSH-Desktop-2.1.0-mac.dmg'))
+    expect(await readFile(result)).toEqual(Buffer.from(artifact))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toBe('https://updates.corp.example/api/downloads/mac')
+    expect(calls[0]?.url).not.toBe(DESKTOP_DOWNLOAD_URLS.darwin)
     await expectNoPartialFiles(directory)
   })
 

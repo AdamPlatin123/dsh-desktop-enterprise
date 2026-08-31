@@ -12,6 +12,10 @@ const updater = vi.hoisted(() => ({
   pending: vi.fn(),
   record: vi.fn(),
   resolve: vi.fn(),
+  downloadUrlsForOrigin: (origin: string) => ({
+    darwin: `${origin}/api/downloads/mac`,
+    win32: `${origin}/api/downloads/windows`,
+  }),
 }))
 const childProcess = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => void
@@ -62,6 +66,7 @@ vi.mock('../src/diagnostic-export.ts', () => ({
 vi.mock('../src/update-download.ts', () => ({
   desktopUpdateFilename: updater.filename,
   downloadDesktopUpdate: updater.download,
+  desktopUpdateDownloadUrlsForOrigin: updater.downloadUrlsForOrigin,
   pendingDesktopUpdateArtifact: updater.pending,
   recordDesktopUpdateArtifact: updater.record,
   resolveDesktopUpdateArtifact: updater.resolve,
@@ -1869,7 +1874,7 @@ describe('Electron desktop runtime', () => {
     electron.net.fetch.mockResolvedValueOnce(response)
     updater.download.mockResolvedValueOnce('/tmp/DSH-Desktop-2.1.0-mac.dmg')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
     const release = runtime.schedule(spec)
     await runtime.mountScheduled()
     const activeWindow = electron.browserWindows[0]
@@ -1932,6 +1937,10 @@ describe('Electron desktop runtime', () => {
       version: '2.1.0',
       destinationPath: '/tmp/Downloads/DSH-Desktop-2.1.0-mac.dmg',
       request: expect.any(Function),
+      downloadUrls: {
+        darwin: 'https://update.test/api/downloads/mac',
+        win32: 'https://update.test/api/downloads/windows',
+      },
       signal: controller.signal,
     })
     expect(electron.shell.openPath).toHaveBeenCalledWith('/tmp/DSH-Desktop-2.1.0-mac.dmg')
@@ -1972,7 +1981,7 @@ describe('Electron desktop runtime', () => {
     updater.download.mockResolvedValueOnce('C:\\Updates\\DSH-Desktop-2.1.0-windows.exe')
     const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
     runtime.schedule({ ...spec, requestQuit })
     electron.dialog.showSaveDialog.mockResolvedValueOnce({
       canceled: false,
@@ -2009,7 +2018,7 @@ describe('Electron desktop runtime', () => {
     updater.download.mockResolvedValueOnce('C:\\Updates\\DSH-Desktop-2.1.0-windows.exe')
     const requestQuit = vi.fn()
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
     runtime.schedule({ ...spec, requestQuit })
     electron.dialog.showSaveDialog.mockResolvedValueOnce({
       canceled: false,
@@ -2036,7 +2045,7 @@ describe('Electron desktop runtime', () => {
     updater.download.mockResolvedValueOnce('C:\\Updates\\DSH-Desktop-2.1.0-windows.exe')
     electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1, checkboxChecked: false })
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
     electron.dialog.showSaveDialog.mockResolvedValueOnce({
       canceled: false,
       filePath: 'C:\\Updates\\DSH-Desktop-2.1.0-windows.exe',
@@ -2059,7 +2068,7 @@ describe('Electron desktop runtime', () => {
     })
     const logger = { error: vi.fn(), errorCause: vi.fn() }
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, logger)
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, logger, undefined, undefined, undefined, 'https://update.test')
 
     await expect(runtime.updates.downloadAndOpen('2.1.0', new AbortController().signal))
       .resolves.toBeUndefined()
@@ -2073,7 +2082,7 @@ describe('Electron desktop runtime', () => {
   it('does not download when the update destination picker is cancelled', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
 
     await runtime.updates.downloadAndOpen('2.1.0', new AbortController().signal)
 
@@ -2116,7 +2125,7 @@ describe('Electron desktop runtime', () => {
     updater.download.mockResolvedValueOnce('/tmp/DSH-Desktop-2.1.0-mac.dmg')
     electron.shell.openPath.mockResolvedValueOnce('Launch Services rejected the image')
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
     electron.dialog.showSaveDialog.mockResolvedValueOnce({
       canceled: false,
       filePath: '/tmp/DSH-Desktop-2.1.0-mac.dmg',
@@ -2135,7 +2144,7 @@ describe('Electron desktop runtime', () => {
       finishOpen = resolve
     }))
     const { ElectronDesktopRuntime } = await import('../src/electron-runtime.ts')
-    const runtime = new ElectronDesktopRuntime(async () => {})
+    const runtime = new ElectronDesktopRuntime(async () => {}, undefined, undefined, undefined, undefined, undefined, 'https://update.test')
     const controller = new AbortController()
     electron.dialog.showSaveDialog.mockResolvedValueOnce({
       canceled: false,

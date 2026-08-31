@@ -46,6 +46,7 @@ import {
   desktopTrayLabel,
 } from './tray-locale.ts'
 import {
+  desktopUpdateDownloadUrlsForOrigin,
   desktopUpdateFilename,
   downloadDesktopUpdate,
   pendingDesktopUpdateArtifact,
@@ -132,6 +133,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     workspaceVolumeQuery: WindowsVolumeQuery | undefined = undefined,
     private readonly mainWindowState: MainWindowStateStore = new FileMainWindowStateStore(app.getPath('userData')),
     installationId?: DesktopInstallationId,
+    /** Preset self-hosted update source origin; undefined keeps downloads off the preset path. */
+    private readonly updateOrigin?: string,
   ) {
     this.platformStrategy = electronPlatformStrategy()
     this.platform = this.platformStrategy.platform
@@ -647,6 +650,11 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (platform === undefined) {
       throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
     }
+    // No preset origin, no download: the enterprise runtime must never fall
+    // back to the upstream default download hosts.
+    if (this.updateOrigin === undefined) {
+      throw new Error('dsh-plugin-desktop: update downloads require a preset self-hosted update origin')
+    }
     const destinationPath = await this.chooseUpdateDestination(version)
     if (destinationPath === undefined) return
     signal.throwIfAborted()
@@ -655,6 +663,7 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       version,
       destinationPath,
       request: (url, init) => net.fetch(url, init),
+      downloadUrls: desktopUpdateDownloadUrlsForOrigin(this.updateOrigin),
       signal,
     })
     signal.throwIfAborted()

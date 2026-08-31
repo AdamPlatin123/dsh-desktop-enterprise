@@ -143,6 +143,24 @@ describe('public Desktop version check', () => {
     })).resolves.toMatchObject({ status: 'update-available' })
   })
 
+  it('queries an explicit endpoint override instead of the public endpoint', async () => {
+    const calls: string[] = []
+    await expect(checkForStableUpdate({
+      currentVersion: '2.9.9',
+      endpoint: 'https://updates.corp.example/api/desktop/version',
+      request: async (url) => {
+        calls.push(url)
+        return versionResponse('2.10.0')
+      },
+    })).resolves.toEqual({
+      status: 'update-available',
+      currentVersion: '2.9.9',
+      latestVersion: '2.10.0',
+    })
+    expect(calls).toEqual(['https://updates.corp.example/api/desktop/version'])
+    expect(calls[0]).not.toBe(DESKTOP_VERSION_ENDPOINT)
+  })
+
   it.each([
     ['leading v', { version: 'v2.1.0' }],
     ['prerelease', { version: '2.1.0-rc.1' }],

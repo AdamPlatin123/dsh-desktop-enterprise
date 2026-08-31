@@ -14,7 +14,7 @@ Ordinary users can start with the [user guide](user-guide.en.md) and never need 
 | --- | --- |
 | [User guide](user-guide.en.md) | Installation, profiles, modes, terminal, plugins, and updates |
 | [FAQ](faq.en.md) | Direct answers about platforms, bundled runtime, project status, data, plugins, and updates |
-| [Privacy Policy](../PRIVACY.md) | Official updates, downloads, local data, third-party services, and user choices |
+| [Privacy Policy](../PRIVACY.md) | Enterprise deployment edition: gateway data plane, outbound-contact inventory, telemetry defaults, local data, and user choices |
 | [Why Desktop](why-desktop.en.md) | The boundary with upstream Harness and the case for plugins |
 
 ### Developer and maintainer documentation
@@ -32,6 +32,8 @@ Ordinary users can start with the [user guide](user-guide.en.md) and never need 
 | [Architecture](architecture.en.md) | Electron, Host, the Web carrier, profiles, and packaging |
 | [Desktop service reference](../dsh-plugin-desktop/docs/plugin-services.md) | Stable `desktopProfiles` and `desktopPnpm` contracts with TypeScript examples |
 | [Package reference](../dsh-plugin-desktop/README.md) | Detailed build, runtime, release, and limitation notes |
+| [Enterprise self-hosting and outbound contacts](enterprise-self-hosting.md) | Update-origin preset contract, default-disabled market, telemetry endpoint, and installation UUID defaults |
+| [Fork upgrade SOP](fork-sop.md) | Upstream pin record, enterprise patch registry, upgrade flow, rollback, and safety holds |
 
 ## How the README files are organized
 

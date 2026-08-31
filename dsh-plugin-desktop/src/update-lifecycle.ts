@@ -32,6 +32,12 @@ export interface DesktopUpdateLifecycleOptions {
   readonly policy: DesktopUpdatePolicy
   readonly locale: () => DesktopLocale
   readonly registerTrayItem: (item: DesktopTrayItem) => DesktopTrayItemRegistration
+  /**
+   * Version endpoint every check queries. The enterprise wiring derives it
+   * from the preset self-hosted update source, so a lifecycle never exists
+   * without an explicit, deployment-owned endpoint.
+   */
+  readonly endpoint: string
 }
 
 /** Lifecycle handle for one generation's update operations. */
@@ -154,6 +160,7 @@ class DesktopUpdateLifecycleOwner implements DesktopUpdateLifecycle {
       try {
         return await checkForStableUpdate({
           currentVersion: this.options.adapter.currentVersion,
+          endpoint: this.options.endpoint,
           ...(this.options.adapter.installationId === undefined
             ? {}
             : { installationId: this.options.adapter.installationId }),

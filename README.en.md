@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://dshdesktop.cn"><img src="assets/desktop-hero-en.png" alt="DSH Desktop, an open-source desktop client built on DeepSeek Harness" width="100%"></a>
+  <img src="assets/desktop-hero-en.png" alt="DSH Desktop, an open-source desktop client built on DeepSeek Harness" width="100%">
 </p>
 
 <h1 align="center">DSH Desktop</h1>
@@ -8,7 +8,7 @@
   <strong>An open-source desktop client for Windows and macOS, built on DeepSeek Harness.</strong>
 </p>
 
-<h3 align="center"><a href="https://dshdesktop.cn">One-click download, ready to use out of the box.</a></h3>
+<h3 align="center">Enterprise self-hosted build (DSH Enterprise fork).</h3>
 
 <p align="center">
   Everything is a plugin — the desktop itself is a plugin.
@@ -25,7 +25,6 @@
   <a href="https://github.com/anywhere-labs/deepseek-harness-desktop/releases"><img src="https://img.shields.io/github/downloads/anywhere-labs/deepseek-harness-desktop/total?style=flat&amp;label=downloads&amp;color=4D6BFE" alt="Total downloads"></a>
   <a href="https://github.com/anywhere-labs/deepseek-harness-desktop"><img src="https://img.shields.io/github/stars/anywhere-labs/deepseek-harness-desktop?style=flat&amp;label=%E2%98%85&amp;color=08C" alt="GitHub stars"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
-  <a href="https://discord.gg/TJeGqKRNM"><img src="https://img.shields.io/badge/Discord-5865F2?style=flat&amp;logo=discord&amp;logoColor=white" alt="Join Discord"></a>
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-4493F8?style=flat-square" alt="Supported platforms: macOS and Windows">
 </p>
 
@@ -35,27 +34,11 @@ DSH Desktop integrates the local Web UI, Host service, and plugin system from [D
 
 ## Download and install
 
-Current release installers support Windows x64 and macOS Universal. No extra environment is needed — download, install, and start using it with one click.
-
-| Platform | Download | Installation |
-| --- | --- | --- |
-| Windows x64 | [Download installer](https://www.dshdesktop.cn/api/downloads/windows) | Run the NSIS installer and follow its prompts |
-| macOS Universal | [Download DMG](https://www.dshdesktop.cn/api/downloads/mac) | Open the DMG and drag DSH Desktop into Applications |
+This repository is an enterprise self-hosted build: installers are distributed internally by the deploying organization, update checks are off by default, and they activate only when a self-hosted update origin is preset (see [`docs/enterprise-self-hosting.md`](docs/enterprise-self-hosting.md)). Supported platforms remain Windows x64 and macOS Universal with unchanged installation steps (NSIS installer / drag the DMG into Applications).
 
 See the [user guide](docs/user-guide.en.md) and [FAQ](docs/faq.en.md) for plugin commands, platform details, and troubleshooting.
 
 Together with every plugin author, we want to build an open, composable, and sustainable DSH plugin ecosystem where plugins grow alongside each other. Read the [DSH plugin ecosystem manifesto](docs/plugin-ecosystem.en.md).
-
-<details open>
-<summary>❤️ Sponsors</summary>
-
-| Logo | Introduction |
-| --- | --- |
-| <a href="https://dshdesktop.cn/sponsors/wuying"><img src="assets/sponsors/wuying-cloud-computer-logo.png" alt="Alibaba Cloud Wuying Cloud Computer" width="96"></a> | [**Alibaba Cloud · Wuying Cloud Computer**](https://dshdesktop.cn/sponsors/wuying)<br>Thanks to **Alibaba Cloud** Wuying Cloud Computer for sponsoring this project. Wuying Cloud Computer Personal Edition provides a cloud desktop for individual users, with compute, storage, and the desktop environment hosted in the cloud. It supports access from multiple device types and lets users choose specifications on demand, making it useful for remote work, learning, development, and lightweight creative workflows.<br><br>[**Register in WeChat →**](https://dshdesktop.cn/sponsors/wuying) |
-| <a href="https://astraflow.ucloud.cn/modelverse/playground?ytag=geo_waituo_dsh"><img src="assets/sponsors/astraflow-logo.png" alt="UCloud AstraFlow" width="96"></a> | [**UCloud · AstraFlow**](https://astraflow.ucloud.cn/modelverse/playground?ytag=geo_waituo_dsh)<br>Thanks to **UCloud** AstraFlow for sponsoring this project. **UCloud** AstraFlow ModelVerse supports one-click access to 200+ models, including Kimi K3, DeepSeek V4/V3, Qwen 3, GLM5.2, happyhorse, and other leading open-source models worldwide, with no self-training required.<br><br>[**Visit website →**](https://astraflow.ucloud.cn/modelverse/playground?ytag=geo_waituo_dsh) |
-| <a href="https://88api.ai/sign-up?aff=VnEb"><img src="assets/sponsors/88api-logo.png" alt="88API" width="120"></a> | [**88API**](https://88api.ai/sign-up?aff=VnEb)<br>88API is a one-stop multi-model API aggregation platform operated by an overseas company, with stable, efficient service and invoice support. It provides official-transfer and open-source DeepSeek channels, with pricing as low as 50% off, and is designed to work well with DSH Desktop. One API key can connect to many domestic and overseas models across text chat, image, audio, music, and video generation APIs for AI coding, agent automation, content creation, and application development.<br><br>[**Register now →**](https://88api.ai/sign-up?aff=VnEb) |
-
-</details>
 
 ## Documentation
 
@@ -189,8 +172,6 @@ Choose whichever platform you prefer to discuss usage, plugin development, and p
     </tr>
   </tbody>
 </table>
-
-Discord: [Join the DSH Desktop community](https://discord.gg/TJeGqKRNM)
 
 If you would like to join our technical team, contact us at [t4wefan@qq.com](mailto:t4wefan@qq.com).
 

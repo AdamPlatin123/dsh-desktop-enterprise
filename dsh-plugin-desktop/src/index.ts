@@ -57,11 +57,11 @@ import {
   handleDesktopTerminalOpenRequest,
 } from './desktop-settings-route.ts'
 import type {} from './desktop-settings-controller.ts'
-import type {} from './enterprise-desktop-routes.ts'
 import {
   DESKTOP_ENTERPRISE_IDENTITY_PATH,
   DESKTOP_ENTERPRISE_REAUTH_PATH,
   DESKTOP_ENTERPRISE_SIGNOUT_PATH,
+  enterpriseSessionRejection,
   handleDesktopEnterpriseIdentityRequest,
   handleDesktopEnterpriseReauthRequest,
   handleDesktopEnterpriseSignoutRequest,
@@ -102,16 +102,31 @@ export const DESKTOP_SETTINGS_NAMESPACE = settingsNamespace('dsh-desktop')
 const UI_THEME_SETTINGS_NAMESPACE = settingsNamespace(THEME_SETTINGS_NAMESPACE)
 const UI_LOCALE_SETTINGS_NAMESPACE = settingsNamespace(LOCALE_SETTINGS_NAMESPACE)
 
-/** Apply the official Connection trust and browser-auth fence before a private Desktop route. */
+/**
+ * Apply the official Connection trust and browser-auth fence before a private
+ * Desktop route, then the enterprise session layer (15.3): while an
+ * organization session exists but is no longer valid, the local HTTP API
+ * rejects even though the upstream 30-day browser cookie would authenticate.
+ * `allowWhenSessionInvalid` keeps the session-management actions (sign-out and
+ * re-login) reachable as the recovery path; deployments without an enterprise
+ * surface keep the upstream shape.
+ */
 function rejectDesktopRequest(
   ctx: Context,
   req: IncomingMessage,
   res: ServerResponse,
+  allowWhenSessionInvalid = false,
 ): boolean {
   const rejection = ctx.connection.requestRejection(req)
-  if (rejection === undefined) return false
-  res.writeHead(rejection)
-  res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+  if (rejection !== undefined) {
+    res.writeHead(rejection)
+    res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+    return true
+  }
+  const enterpriseRejection = enterpriseSessionRejection(ctx.get('desktopEnterprise'), allowWhenSessionInvalid)
+  if (enterpriseRejection === undefined) return false
+  res.writeHead(enterpriseRejection)
+  res.end('unauthorized')
   return true
 }
 
@@ -342,18 +357,20 @@ export function apply(ctx: Context, config: Config): void {
   }
   const enterpriseSurface = ctx.get('desktopEnterprise')
   if (enterpriseSurface !== undefined) {
+    // The identity projection is data-plane (fenced); sign-out and re-login
+    // stay reachable while the session is invalid — they are the recovery path.
     const enterpriseRoutes = [
-      [DESKTOP_ENTERPRISE_IDENTITY_PATH, handleDesktopEnterpriseIdentityRequest],
-      [DESKTOP_ENTERPRISE_REAUTH_PATH, handleDesktopEnterpriseReauthRequest],
-      [DESKTOP_ENTERPRISE_SIGNOUT_PATH, handleDesktopEnterpriseSignoutRequest],
+      [DESKTOP_ENTERPRISE_IDENTITY_PATH, handleDesktopEnterpriseIdentityRequest, false],
+      [DESKTOP_ENTERPRISE_SIGNOUT_PATH, handleDesktopEnterpriseSignoutRequest, true],
+      [DESKTOP_ENTERPRISE_REAUTH_PATH, handleDesktopEnterpriseReauthRequest, true],
     ] as const
-    for (const [path, handler] of enterpriseRoutes) {
+    for (const [path, handler, allowWhenSessionInvalid] of enterpriseRoutes) {
       ctx.effect(
         () => ctx.webServer.register({
           kind: 'exact',
           path,
           handler: (req, res) => {
-            if (rejectDesktopRequest(ctx, req, res)) return
+            if (rejectDesktopRequest(ctx, req, res, allowWhenSessionInvalid)) return
             return handler(req, res, rendererOrigin, enterpriseSurface)
           },
         }),

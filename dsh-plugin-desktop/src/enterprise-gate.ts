@@ -100,6 +100,8 @@ export class DesktopEnterpriseGate {
   private presetClientId: string | undefined
   private reauthing = false
   private identity: EnterpriseIdentity | undefined
+  /** True only while an established session is usable (15.3 fence probe). */
+  private sessionEstablished = false
 
   constructor(private readonly deps: DesktopEnterpriseGateDeps) {
     this.transport = deps.transport ?? fetchEnterpriseTokenTransport
@@ -110,6 +112,16 @@ export class DesktopEnterpriseGate {
   /** Identity projection for the settings-page account area; undefined until first read. */
   getIdentity(): EnterpriseIdentity | undefined {
     return this.identity
+  }
+
+  /**
+   * Synchronous validity of the established organization session. False until
+   * the first successful sign-in and again whenever the login window reopens
+   * (expired refresh, explicit re-login, or sign-out); the local HTTP fence
+   * consumes this to reject private routes while no usable session exists.
+   */
+  isSessionValid(): boolean {
+    return this.sessionEstablished
   }
 
   /** Surface for main's activation/second-instance reveal chain. */
@@ -336,6 +348,7 @@ export class DesktopEnterpriseGate {
    * retries — it never turns a verified session into a login failure.
    */
   private async establishSession(): Promise<void> {
+    this.sessionEstablished = true
     await this.updateIdentity()
     try {
       await this.deps.onSessionEstablished?.()
@@ -391,6 +404,7 @@ export class DesktopEnterpriseGate {
     if (this.reauthing) return
     this.reauthing = true
     try {
+      this.sessionEstablished = false
       this.refresher?.stop()
       this.refresher = undefined
       const result = await this.runLoginWindow(notice)
@@ -411,6 +425,7 @@ export class DesktopEnterpriseGate {
     if (this.reauthing) return
     this.reauthing = true
     try {
+      this.sessionEstablished = false
       this.refresher?.stop()
       this.refresher = undefined
       const tokens = await readEnterpriseTokens(this.deps.userDataDir, this.deps.protector).catch(() => undefined)

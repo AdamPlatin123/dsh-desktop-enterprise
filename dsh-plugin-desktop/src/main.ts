@@ -167,6 +167,9 @@ import {
   resolveEnterpriseGatewayPreset,
 } from './enterprise-gateway-preset.ts'
 import {
+  resolveEnterpriseUpdatePreset,
+} from './enterprise-update-preset.ts'
+import {
   DESKTOP_NOTIFICATIONS_SETTINGS_NAMESPACE,
   type DesktopNotificationSettings,
 } from './notifications.ts'
@@ -451,6 +454,10 @@ async function start(): Promise<void> {
   )
   let restartRequested = false
   const installationId = await getOrCreateDesktopInstallationId(app.getPath('userData'))
+  // Enterprise update source (15.1): installer downloads follow the same
+  // preset origin as version checks; with no preset no download can start
+  // because the update lifecycle is never mounted.
+  const updatePreset = resolveEnterpriseUpdatePreset()
   runtime = new ElectronDesktopRuntime(async target => {
     if (shutdown === undefined) {
       throw new Error('dsh-plugin-desktop: shutdown coordinator is not ready')
@@ -473,7 +480,8 @@ async function start(): Promise<void> {
     // Main owns every pre-health failure branch. Returning true prevents the
     // legacy Renderer recovery dialog from racing the native startup window.
     return report.status === 'failed'
-  }, electronLogger, undefined, undefined, installationId)
+  }, electronLogger, undefined, undefined, installationId,
+    updatePreset.status === 'ok' ? updatePreset.origin : undefined)
   const finalExit = (code: number): void => { nativeExit.finish(code) }
   shutdown = createDesktopShutdown(
     async () => { await generation.release() },
@@ -1160,6 +1168,7 @@ async function start(): Promise<void> {
         hostCtx.provide('desktopPnpmBootstrap', desktopPnpmBootstrap)
         hostCtx.provide('desktopEnterprise', {
           identity: () => enterpriseGate?.getIdentity(),
+          sessionValid: () => enterpriseGate?.isSessionValid() === true,
           signout: () => enterpriseGate?.signout() ?? Promise.resolve(),
           reauth: () => enterpriseGate?.requestReauth('session-expired') ?? Promise.resolve(),
         })

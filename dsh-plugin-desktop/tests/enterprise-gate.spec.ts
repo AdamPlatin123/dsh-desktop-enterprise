@@ -327,6 +327,48 @@ describe('desktop enterprise gate', () => {
     }
   })
 
+  it('exposes the session-validity probe across expiry, re-login, and sign-out', async () => {
+    const { gate, fake, transport, dispose, userDataDir } = await harness()
+    try {
+      const now = Date.now()
+      await saveEnterpriseTokens(userDataDir, reverseProtector(), storedTokens({
+        expiresAt: now + 400_000,
+        refreshAt: now - 1000,
+      }))
+      expect(gate.isSessionValid()).toBe(false)
+      await expect(gate.run()).resolves.toEqual({ outcome: 'authenticated' })
+      expect(gate.isSessionValid()).toBe(true)
+      gate.startMaintenance()
+
+      // A revoked refresh family reopens the login window: the probe flips
+      // to invalid for the local HTTP fence while re-login is pending.
+      transport.mockImplementation(async () => {
+        throw new EnterpriseOAuthError('invalid_grant', 'family revoked')
+      })
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(1) }, { timeout: 5000 })
+      expect(gate.isSessionValid()).toBe(false)
+
+      transport.mockImplementation(async () => ({
+        status: 200,
+        text: JSON.stringify({ access_token: 'a2', refresh_token: 'r2', expires_in: 600, token_type: 'Bearer' }),
+      }))
+      fake.finish(0, { action: 'continue' })
+      await vi.waitFor(() => { expect(gate.isSessionValid()).toBe(true) }, { timeout: 5000 })
+
+      // Explicit sign-out closes the session immediately; a completed
+      // sign-in through the reopened window re-establishes it.
+      const signout = gate.signout()
+      await vi.waitFor(() => { expect(fake.windows).toHaveLength(2) }, { timeout: 5000 })
+      expect(gate.isSessionValid()).toBe(false)
+      fake.finish(1, { action: 'continue' })
+      await signout
+      expect(gate.isSessionValid()).toBe(true)
+      gate.dispose()
+    } finally {
+      await dispose()
+    }
+  })
+
   it('blocks sign-in behind the patch-failed view when the machine patch cannot be written', async () => {
     const { gate, fake, patchWriter, dispose } = await harness()
     patchWriter.mockImplementation(async () => { throw new Error('EACCES on the DSH home') })

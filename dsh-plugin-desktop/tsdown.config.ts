@@ -11,6 +11,7 @@ const PACKAGE_NAME = 'dsh-plugin-desktop'
 const enterpriseDefines = {
   __DSH_ENTERPRISE_GATEWAY_URL__: JSON.stringify(process.env.DSH_ENTERPRISE_GATEWAY_URL ?? ''),
   __DSH_ENTERPRISE_OAUTH_CLIENT_ID__: JSON.stringify(process.env.DSH_ENTERPRISE_OAUTH_CLIENT_ID ?? ''),
+  __DSH_ENTERPRISE_UPDATE_URL__: JSON.stringify(process.env.DSH_ENTERPRISE_UPDATE_URL ?? ''),
 }
 
 export default defineConfig([

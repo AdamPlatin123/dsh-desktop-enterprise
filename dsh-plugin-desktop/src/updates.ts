@@ -6,6 +6,11 @@ import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { DESKTOP_UPDATE_CHECK_PATH } from './desktop-settings-contract.ts'
 import { handleDesktopUpdateCheckRequest } from './desktop-settings-route.ts'
+import {
+  DESKTOP_UPDATE_VERSION_PATH,
+  resolveEnterpriseUpdatePreset,
+} from './enterprise-update-preset.ts'
+import { enterpriseSessionRejection } from './enterprise-desktop-routes.ts'
 import type {} from './runtime.ts'
 import { startDesktopUpdateLifecycle } from './update-lifecycle.ts'
 
@@ -43,12 +48,26 @@ export const Config: z<Config> = z.object({
  * @param config - validated polling and timeout values.
  */
 export function apply(ctx: Context, config: Config): void {
+  // Enterprise compliance (15.1): update checks exist only when a self-hosted
+  // update source is preset. An unset or invalid preset registers nothing —
+  // no tray command, no route, no background poll — and never falls back to
+  // the public upstream endpoint.
+  const preset = resolveEnterpriseUpdatePreset()
+  if (preset.status === 'disabled') {
+    ctx.logger.warn(
+      preset.reason === undefined
+        ? 'dsh-plugin-desktop: no self-hosted update source is preset; Desktop update checks stay disabled'
+        : `dsh-plugin-desktop: ${preset.reason}; Desktop update checks stay disabled`,
+    )
+    return
+  }
   ctx.effect(() => {
     const lifecycle = startDesktopUpdateLifecycle({
       adapter: ctx.desktopRuntime.updates,
       policy: config,
       locale: () => ctx.desktopRuntime.locale,
       registerTrayItem: item => ctx.desktopRuntime.registerTrayItem(item),
+      endpoint: `${preset.origin}${DESKTOP_UPDATE_VERSION_PATH}`,
     })
     const rendererOrigin = `http://127.0.0.1:${String(ctx.webServer.port)}`
     const unregister = ctx.webServer.register({
@@ -59,6 +78,17 @@ export function apply(ctx: Context, config: Config): void {
         if (rejection !== undefined) {
           res.writeHead(rejection)
           res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+          return
+        }
+        // Enterprise session layer (15.3): a signed-out or expired enterprise
+        // session also closes this native-capability route.
+        const enterpriseRejection = enterpriseSessionRejection(
+          ctx.get('desktopEnterprise'),
+          false,
+        )
+        if (enterpriseRejection !== undefined) {
+          res.writeHead(enterpriseRejection)
+          res.end('unauthorized')
           return
         }
         return handleDesktopUpdateCheckRequest(

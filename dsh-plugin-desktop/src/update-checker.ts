@@ -44,6 +44,13 @@ export interface UpdateCheckOptions {
   readonly request?: UpdateRequest
   /** Installation UUID attached only to the fixed version-check endpoint. */
   readonly installationId?: DesktopInstallationId
+  /**
+   * Version endpoint to query. Enterprise deployments pass their preset
+   * self-hosted origin's version path; when omitted the checker falls back to
+   * the fixed public endpoint, and the enterprise wiring never starts a check
+   * without an explicit preset endpoint.
+   */
+  readonly endpoint?: string
 }
 
 /** Successful comparison returned by the stable version service. */
@@ -96,8 +103,8 @@ export function compareSemVerVersions(left: string, right: string): number | nul
 }
 
 /**
- * Check the fixed DSH Desktop version endpoint for a newer stable release.
- * @param options - installed version, caller-owned signal, and optional request adapter.
+ * Check one version endpoint for a newer stable release.
+ * @param options - installed version, endpoint, caller-owned signal, and optional request adapter.
  * @returns a successful comparison, or null when any request or validation step fails.
  */
 export async function checkForStableUpdate(
@@ -124,7 +131,7 @@ export async function checkForStableUpdate(
 
   let response: Response
   try {
-    response = await request(DESKTOP_VERSION_ENDPOINT, init)
+    response = await request(options.endpoint ?? DESKTOP_VERSION_ENDPOINT, init)
   } catch {
     return null
   }

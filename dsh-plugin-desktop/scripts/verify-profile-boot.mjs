@@ -242,8 +242,10 @@ try {
   if (desktopSettings?.mode !== 'advanced') {
     throw new Error('assembled Host settings are missing the advanced dsh-desktop mode')
   }
-  if (!trayItems.some(item => item.label() === 'Check for Updates…')) {
-    throw new Error('assembled desktop profile is missing the update tray command')
+  // Enterprise default: without a preset self-hosted update origin the update
+  // surface stays entirely off, including the tray command.
+  if (trayItems.some(item => item.label() === 'Check for Updates…')) {
+    throw new Error('assembled desktop profile registered an update tray command without a preset update source')
   }
   if (process.platform !== 'linux'
     && !trayItems.some(item => item.label() === 'Open DSH Terminal')) {

@@ -77,6 +77,13 @@ interface PluginHarness {
   lanHttps: DesktopLanHttpsRuntime
   setLanHttpsEnabled: ReturnType<typeof vi.fn<DesktopLanHttpsRuntime['setEnabled']>>
   requestRejection: ReturnType<typeof vi.fn<(request: ConnectionTrustRequest) => ConnectionRequestRejection>>
+  enterpriseSurface: {
+    readonly identity: () => undefined
+    readonly sessionValid: () => boolean
+    readonly signout: ReturnType<typeof vi.fn<() => Promise<void>>>
+    readonly reauth: ReturnType<typeof vi.fn<() => Promise<void>>>
+  }
+  setEnterpriseSessionValid(value: boolean): void
   route(path: string): WebRoute | undefined
   routes(): readonly WebRoute[]
   notify(next: DesktopSettings, prev: DesktopSettings): Promise<void>
@@ -102,6 +109,13 @@ function createHarness(
   ) => ConnectionRequestRejection>(() => undefined)
   const routes = new Map<string, WebRoute>()
   const settingsUpdated = new Set<(namespace: unknown, next: unknown) => void>()
+  let enterpriseSessionValid = true
+  const enterpriseSurface = {
+    identity: () => undefined,
+    sessionValid: () => enterpriseSessionValid,
+    signout: vi.fn(async () => {}),
+    reauth: vi.fn(async () => {}),
+  }
   let localePreference: LocaleId | undefined
   let themePreference: ThemePreference = 'system'
   const browserAccess = createDesktopBrowserAccess(
@@ -194,6 +208,7 @@ function createHarness(
       if (String(key) === 'desktopRuntime') return runtime
       if (String(key) === 'desktopBrowserAccess') return browserAccess
       if (String(key) === 'desktopLanHttps') return lanHttps
+      if (String(key) === 'desktopEnterprise') return enterpriseSurface
       return () => {}
     }),
     effect: vi.fn((register: () => unknown) => register()),
@@ -217,6 +232,8 @@ function createHarness(
     lanHttps,
     setLanHttpsEnabled,
     requestRejection,
+    enterpriseSurface,
+    setEnterpriseSessionValid: (value: boolean) => { enterpriseSessionValid = value },
     route: path => routes.get(path),
     routes: () => [...routes.values()],
     notify: async (next, prev) => { await watcher?.(next, prev) },
@@ -433,6 +450,49 @@ describe('desktop Host plugin', () => {
     expect(harness.rendererBoot).not.toHaveBeenCalled()
     expect(harness.pickDirectory).not.toHaveBeenCalled()
     expect(harness.validateDirectory).not.toHaveBeenCalled()
+  })
+
+  it('layers the enterprise session fence over private routes while recovery actions stay reachable', async () => {
+    const harness = createHarness()
+    apply(harness.ctx, config)
+    harness.setEnterpriseSessionValid(false)
+    harness.requestRejection.mockReturnValue(undefined)
+
+    const invoke = async (path: string): Promise<{
+      readonly writeHead: ReturnType<typeof vi.fn>
+      readonly end: ReturnType<typeof vi.fn>
+      readonly statusCode: number
+    }> => {
+      const route = harness.route(path)
+      if (route === undefined) throw new Error(`route ${path} is not registered`)
+      const req = { headers: {} } as IncomingMessage
+      const writeHead = vi.fn()
+      const end = vi.fn()
+      const res = { statusCode: 200, writeHead, end, setHeader: vi.fn() } as unknown as ServerResponse
+      await route.handler(req, res)
+      return { writeHead, end, statusCode: res.statusCode }
+    }
+
+    // Data-plane routes reject fail-closed on an invalid organization session.
+    // (The interactive update route carries the same layer; covered in
+    // updates.spec.ts.)
+    for (const path of [DESKTOP_SETTINGS_PATH, DESKTOP_ENTERPRISE_IDENTITY_PATH]) {
+      const outcome = await invoke(path)
+      expect(outcome.writeHead).toHaveBeenCalledWith(401)
+      expect(outcome.end).toHaveBeenCalledWith('unauthorized')
+    }
+
+    // Sign-out and re-login are the recovery path: they pass the fence and
+    // reach their own handler (405 for the fence test's empty GET).
+    for (const path of [DESKTOP_ENTERPRISE_SIGNOUT_PATH, DESKTOP_ENTERPRISE_REAUTH_PATH]) {
+      const outcome = await invoke(path)
+      expect(outcome.writeHead).not.toHaveBeenCalled()
+      expect(outcome.statusCode).toBe(405)
+    }
+
+    harness.setEnterpriseSessionValid(true)
+    const restored = await invoke(DESKTOP_SETTINGS_PATH)
+    expect(restored.writeHead).not.toHaveBeenCalledWith(401)
   })
 
   it('serves the Windows native picker through a same-origin desktop route', async () => {

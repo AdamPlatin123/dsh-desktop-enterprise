@@ -14,7 +14,7 @@
 | --- | --- |
 | [用户指南](user-guide.md) | 安装、profile、模式、终端、插件命令和更新 |
 | [常见问题](faq.md) | 支持平台、内置环境、官方边界、数据、插件和更新的直接回答 |
-| [隐私政策](../PRIVACY.zh.md) | 官方更新、下载、本地数据、第三方服务与用户选择 |
+| [隐私政策](../PRIVACY.zh.md) | 企业部署版：网关数据面、外联清单、遥测默认状态、本地数据与用户选择 |
 | [为什么做 Desktop](why-desktop.md) | Desktop 与官方 Harness 的边界，以及为什么坚持插件化 |
 
 ### 开发者与维护者文档
@@ -32,6 +32,8 @@
 | [架构说明](architecture.md) | Electron、Host、Web carrier、profile 和打包之间的关系 |
 | [Desktop service 参考](../dsh-plugin-desktop/docs/plugin-services.md) | `desktopProfiles`、`desktopPnpm` 的稳定 contract 和 TypeScript 示例 |
 | [包级参考](../dsh-plugin-desktop/README.md) | 完整的构建、运行、发布和已知限制 |
+| [企业自托管与外联配置](enterprise-self-hosting.md) | 更新源预置契约、市场默认禁用、遥测端点与安装 UUID 的全部默认状态 |
+| [Fork 升级 SOP](fork-sop.md) | 上游 pin 记录、企业补丁登记、升级流程、回滚与安全停留 |
 
 ## README 文件怎么分工
 

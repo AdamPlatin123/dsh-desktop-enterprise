@@ -14,10 +14,35 @@ export type DesktopEnterpriseIdentityReader = () => EnterpriseIdentity | undefin
 /** The launcher-owned enterprise session surface, provided by main. */
 export interface DesktopEnterpriseSurface {
   readonly identity: DesktopEnterpriseIdentityReader
+  /**
+   * Synchronous session-validity probe for the local HTTP fence (15.3).
+   * True only while an established organization session is usable; the
+   * re-login window, a failed refresh, or sign-out report false.
+   */
+  readonly sessionValid: () => boolean
   /** Revoke, clear, and reopen the login window. */
   readonly signout: () => Promise<void>
   /** Reopen the login window behind the session-expired notice. */
   readonly reauth: () => Promise<void>
+}
+
+/**
+ * Enterprise layer of the local HTTP fence (15.3): layer the revocable
+ * organization session on top of the upstream browser-trust fence. Deployments
+ * without an enterprise surface keep the upstream shape; a surface that does
+ * not affirmatively report a valid session is rejected fail-closed, so an
+ * expired desktop session also closes the local HTTP API even while the
+ * upstream 30-day browser cookie would still authenticate it.
+ *
+ * Returns the rejection status, or undefined when the request is admitted.
+ */
+export function enterpriseSessionRejection(
+  surface: DesktopEnterpriseSurface | undefined,
+  allowWhenSessionInvalid: boolean,
+): 401 | undefined {
+  if (allowWhenSessionInvalid) return undefined
+  if (surface === undefined) return undefined
+  return surface.sessionValid() === true ? undefined : 401
 }
 
 declare module '@deepseek-ai/cordis' {
