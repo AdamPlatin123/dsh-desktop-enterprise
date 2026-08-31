@@ -121,6 +121,10 @@ export class EnterpriseLlmTokenRefresher {
       this.schedule(delay)
       return false
     }
+    // A stop() (sign-out teardown) may land while the issuance was in flight;
+    // the write points are already cleared then, so the fresh token must not
+    // resurrect them for an account that just signed out.
+    if (this.stopped) return false
     this.backoffExponent = 0
     this.deps.apply(issued)
     const now = this.deps.now()

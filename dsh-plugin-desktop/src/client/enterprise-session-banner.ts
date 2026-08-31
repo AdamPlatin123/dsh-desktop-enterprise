@@ -170,8 +170,16 @@ export function applyEnterpriseSessionBanner(ctx: ClientContext, api: DesktopSet
   )
   ctx.remote.$on('api-session/error', (_sessionId: string, message: string) => {
     if (!detectEnterpriseSessionRejection(message)) return
-    upsertBanner({ t: key => t(key) }, () => {
-      void api.requestReauth().catch(() => undefined)
-    })
+    // Only an enterprise session owns the desktop LLM token whose rejection
+    // this banner maps; a self-hosted provider's coincidental 401 with a
+    // similar body must not raise Desktop's re-login surface.
+    void api.readEnterpriseIdentity()
+      .then(identity => {
+        if (identity === undefined) return
+        upsertBanner({ t: key => t(key) }, () => {
+          void api.requestReauth().catch(() => undefined)
+        })
+      })
+      .catch(() => undefined)
   })
 }

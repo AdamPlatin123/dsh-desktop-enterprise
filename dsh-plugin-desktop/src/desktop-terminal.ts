@@ -19,6 +19,12 @@ const RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 const DEFAULT_PROFILE = 'DSH_DESKTOP_DEFAULT_PROFILE'
 const DSH_HOME = 'DSH_HOME'
 const PATH = 'PATH'
+/**
+ * The desktop's short-lived LLM egress token lives in the Host's launch
+ * environment; terminal children must never inherit it. (Diagnostics can
+ * still read it from the running Host's own environment, not from a shell.)
+ */
+const DSH_LLM_TOKEN = 'DSH_LLM_TOKEN'
 const WINDOWS_APP_EXECUTABLE = 'DSH_DESKTOP_APP_EXECUTABLE'
 const WINDOWS_DSH_BOOTSTRAP = 'DSH_DESKTOP_DSH_BOOTSTRAP'
 const WINDOWS_ELECTRON_VERSION = 'DSH_DESKTOP_ELECTRON_VERSION'
@@ -492,6 +498,7 @@ function terminalEnvironment(options: DesktopTerminalOptions, files: DesktopTerm
     if (
       normalized === RUN_AS_NODE
       || normalized === DSH_HOME
+      || normalized === DSH_LLM_TOKEN
     ) continue
     if (options.platform === 'win32' && WINDOWS_GENERATED_ENVIRONMENT_KEYS.has(normalized)) continue
     if (normalized === PATH) {

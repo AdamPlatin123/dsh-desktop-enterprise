@@ -923,10 +923,17 @@ async function start(): Promise<void> {
       enterpriseLlmRefresher?.stop()
       enterpriseLlmRefresher = new EnterpriseLlmTokenRefresher({
         gatewayUrl: enterpriseGatewayUrl,
-        readAccessToken: async () => (await readEnterpriseTokens(
-          marketUserDataDir,
-          desktopLanHttpsPrivateKeyProtector(),
-        ).catch(() => undefined))?.accessToken,
+        readAccessToken: async () => {
+          try {
+            return (await readEnterpriseTokens(marketUserDataDir, desktopLanHttpsPrivateKeyProtector()))?.accessToken
+          } catch (cause) {
+            // A transient storage read failure must not silently masquerade as
+            // signed-out state (which would idle the chain without a trace);
+            // the refresher keeps the loop alive on its own backoff schedule.
+            electronLogger.error(`${BIN_NAME}: the llm token chain could not read the stored session: ${cause instanceof Error ? cause.message : String(cause)}`)
+            return undefined
+          }
+        },
         issue: accessToken => issueEnterpriseLlmToken(fetchEnterpriseLlmTokenTransport, {
           gatewayUrl: enterpriseGatewayUrl,
           accessToken,

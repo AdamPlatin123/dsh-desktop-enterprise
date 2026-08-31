@@ -64,6 +64,7 @@ function macOptions(stateDir: string, spawn: DesktopTerminalSpawn): DesktopTermi
       PATH: '/usr/local/bin:/usr/bin:/bin',
       DSH_HOME: '/inherited/dsh-home',
       electron_run_as_node: 'inherited-node-mode',
+      DSH_LLM_TOKEN: 'v1.e2e-test-token',
       KEEP: 'value',
     },
   }
@@ -86,6 +87,7 @@ function windowsOptions(stateDir: string, spawn: DesktopTerminalSpawn): DesktopT
       Path: 'C:\\Windows\\System32;C:\\Windows',
       ELECTRON_RUN_AS_NODE: 'inherited-node-mode',
       dsh_home: 'C:\\inherited',
+      DSH_LLM_TOKEN: 'v1.e2e-test-token',
       SystemRoot: 'C:\\Windows',
     },
     windowsExecutableResolver: command => command === 'powershell.exe'
@@ -210,10 +212,13 @@ describe('desktop terminal environment', () => {
       },
     })
     expect(harness.unref).toHaveBeenCalledOnce()
+    // The desktop LLM egress token never reaches a terminal child.
+    expect(harness.calls[0]?.options.env).not.toHaveProperty('DSH_LLM_TOKEN')
     expect(options.environment).toEqual({
       PATH: '/usr/local/bin:/usr/bin:/bin',
       DSH_HOME: '/inherited/dsh-home',
       electron_run_as_node: 'inherited-node-mode',
+      DSH_LLM_TOKEN: 'v1.e2e-test-token',
       KEEP: 'value',
     })
   })

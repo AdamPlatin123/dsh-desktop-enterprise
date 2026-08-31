@@ -159,20 +159,24 @@ describe('enterprise llm token refresher', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('stops cleanly: no further refreshes and an in-stop issue does not reschedule', async () => {
+  it('stops cleanly: an in-flight issuance after stop applies nothing and never reschedules', async () => {
     let releaseIssuance: ((token: EnterpriseLlmToken) => void) | undefined
     const state = harness()
     state.issue.mockImplementation(() => new Promise<EnterpriseLlmToken>(resolve => { releaseIssuance = resolve }))
     state.refresher.start()
     await flush()
-    state.refresher.stop()
+    state.refresher.stop() // sign-out teardown clears the write points here
     releaseIssuance?.({ token: 'v1.late', expiresAt: 9_000_000, generation: 1 })
     await flush()
+    // The stop landed while the issuance was in flight: the fresh token must
+    // not resurrect the cleared environment of a signed-out account.
+    expect(state.applied).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(600_000)
     expect(state.issue).toHaveBeenCalledTimes(1)
     expect(vi.getTimerCount()).toBe(0)
     await expect(state.refresher.refreshNow()).resolves.toBe(false)
     expect(state.issue).toHaveBeenCalledTimes(1)
+    expect(state.applied).toHaveLength(0)
   })
 
   it('does nothing when signed out (no access token available)', async () => {
