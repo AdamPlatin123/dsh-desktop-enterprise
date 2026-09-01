@@ -8,6 +8,14 @@
  * No conversation titles, no parameter values, no token usage: the server
  * ledger stays the single source of truth for consumption.
  *
+ * Weak binding (organization policy `desktopEvents=on` makes model renewal
+ * conditional on presence): the LLM token refresher submits a projection
+ * batch right before every renewal — pending session events when there are
+ * any, otherwise a single synthesized `heartbeat` row. Every batch carries
+ * a monotonically increasing `seq` (the server keeps a per-uid cursor,
+ * tolerates gaps, refuses regressions); an accepted batch refreshes the
+ * server-side liveness that the renewal gate reads.
+ *
  * The policy is discovered, not presumed: a `404` answer means the
  * deployment keeps reporting off, and the reporter goes silent (pending
  * events are dropped) until the next session start re-probes once. A `401`
@@ -21,7 +29,7 @@ import { createHash } from 'node:crypto'
 export const DESKTOP_ENTERPRISE_PROJECTION_PATH = '/api/sessions/desktop-events'
 
 /** Event types the wire allows (server allowlist; R39 final schema). */
-export type EnterpriseProjectionEventType = 'session.start' | 'session.end'
+export type EnterpriseProjectionEventType = 'session.start' | 'session.end' | 'heartbeat'
 
 /** One wire event. Optional facets are only set when the client knows them. */
 export interface EnterpriseProjectionEvent {
@@ -34,6 +42,13 @@ export interface EnterpriseProjectionEvent {
   /** SHA-256 of the sorted direct plugin-bundle inventory, when known. */
   readonly pluginHash?: string
 }
+
+/**
+ * Session id carried by synthesized heartbeat rows when no organization
+ * session is open (the server only requires a non-empty label; heartbeats
+ * assert presence, not a session lifecycle).
+ */
+export const HEARTBEAT_SESSION_ID = 'heartbeat'
 
 /** Fetch-compatible transport for one projection batch; injectable for tests. */
 export type EnterpriseProjectionTransport = (
@@ -75,6 +90,15 @@ export class EnterpriseProjectionReporter {
   private pluginHash: string | undefined
   private policy: EnterpriseProjectionPolicy = 'unknown'
   private flushTask: Promise<boolean> | undefined
+  /**
+   * Next batch sequence number. Strictly increasing per organization
+   * account: the server keeps a per-uid cursor, tolerates gaps, and refuses
+   * regressions (`409 stale_seq`), so this never resets on clear() — a
+   * rebase (server restart, another device) re-syncs it from the refusal.
+   */
+  private nextSeq = 1
+  /** Most recent organization session id; heartbeat rows carry it when set. */
+  private lastSessionId: string | undefined
 
   constructor(options: EnterpriseProjectionReporterOptions) {
     const gateway = new URL(options.gatewayUrl)
@@ -108,11 +132,13 @@ export class EnterpriseProjectionReporter {
    */
   sessionStarted(sessionId: string): void {
     this.policy = 'unknown'
+    this.lastSessionId = sessionId
     this.enqueue({ sessionId, eventType: 'session.start', occurredAt: this.now() })
   }
 
   /** Record the organization session closing and flush the tail eagerly. */
   sessionEnded(sessionId: string): void {
+    this.lastSessionId = sessionId
     this.enqueue({ sessionId, eventType: 'session.end', occurredAt: this.now() })
   }
 
@@ -131,6 +157,27 @@ export class EnterpriseProjectionReporter {
   clear(): void {
     this.pending.length = 0
     this.toolCounts.clear()
+    // nextSeq deliberately survives clear(): the server-side per-uid cursor
+    // outlives this process's queue, so sequence numbers must never go back.
+  }
+
+  /**
+   * Renewal-time projection submit (weak binding): the token refresher
+   * invokes this right before every LLM token issuance. Pending session
+   * events are flushed as-is; with an empty queue a liveness-only heartbeat
+   * row is synthesized so the renewal batch is never empty (the server
+   * accepts batches of one and every accepted row refreshes liveness).
+   * Resolves to whether a batch was accepted.
+   */
+  async submitHeartbeat(): Promise<boolean> {
+    if (this.pending.length === 0 && this.policy !== 'off') {
+      this.enqueue({
+        sessionId: this.lastSessionId ?? HEARTBEAT_SESSION_ID,
+        eventType: 'heartbeat',
+        occurredAt: this.now(),
+      })
+    }
+    return await this.flush()
   }
 
   /**
@@ -138,7 +185,10 @@ export class EnterpriseProjectionReporter {
    * without any network activity; a `404` verdict also drops the queue —
    * the deployment does not want these rows, so keeping them would only
    * retry forever. Auth and network failures keep the queue for the next
-   * session transition.
+   * session transition. Every batch carries the monotonically increasing
+   * `seq`; a `409 stale_seq` refusal rebases onto the server's lastSeq and
+   * retries the same batch once (server restart, or another device of the
+   * same account advanced the cursor).
    */
   flush(): Promise<boolean> {
     if (this.flushTask !== undefined) return this.flushTask
@@ -151,6 +201,7 @@ export class EnterpriseProjectionReporter {
         accessToken = undefined
       }
       if (accessToken === undefined) return false
+      let rebaseUsed = false
       while (this.pending.length > 0) {
         if (this.policy === 'off') return false
         const batch = this.pending.slice(0, ENTERPRISE_PROJECTION_BATCH_LIMIT)
@@ -168,9 +219,25 @@ export class EnterpriseProjectionReporter {
           const result = await this.transport(`${this.gatewayUrl}${DESKTOP_ENTERPRISE_PROJECTION_PATH}`, {
             method: 'POST',
             headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-            body: JSON.stringify({ events }),
+            body: JSON.stringify({ seq: this.nextSeq, events }),
           })
           status = result.status
+          if (status === 409 && !rebaseUsed) {
+            // Sequence regression: rebase onto the server's cursor and retry
+            // the same batch once. The queue was not spliced, so the loop
+            // re-sends exactly what was refused.
+            let lastSeq: unknown
+            try {
+              lastSeq = (JSON.parse(result.text) as { lastSeq?: unknown }).lastSeq
+            } catch {
+              lastSeq = undefined
+            }
+            if (typeof lastSeq === 'number' && Number.isFinite(lastSeq) && lastSeq >= 0) {
+              this.nextSeq = lastSeq + 1
+              rebaseUsed = true
+              continue
+            }
+          }
         } catch (cause) {
           this.log?.error(`enterprise projection report failed: ${cause instanceof Error ? cause.message : String(cause)}`)
           return false
@@ -188,6 +255,7 @@ export class EnterpriseProjectionReporter {
           return false
         }
         if (status >= 200 && status < 300) {
+          this.nextSeq += 1
           this.pending.splice(0, batch.length)
           this.toolCounts.clear()
           continue

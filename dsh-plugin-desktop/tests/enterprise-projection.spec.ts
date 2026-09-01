@@ -3,6 +3,7 @@ import {
   DESKTOP_ENTERPRISE_PROJECTION_PATH,
   EnterpriseProjectionReporter,
   ENTERPRISE_PROJECTION_BATCH_LIMIT,
+  HEARTBEAT_SESSION_ID,
   MAX_PENDING_PROJECTION_EVENTS,
   pluginInventoryHash,
   type EnterpriseProjectionEvent,
@@ -52,6 +53,10 @@ function buildReporter(overrides: {
 
 function parseEvents(body: string): Array<Record<string, unknown>> {
   return (JSON.parse(body) as { events: Array<Record<string, unknown>> }).events
+}
+
+function parseBatch(body: string): { seq: number, events: Array<Record<string, unknown>> } {
+  return JSON.parse(body) as { seq: number, events: Array<Record<string, unknown>> }
 }
 
 describe('enterprise projection payload', () => {
@@ -234,6 +239,111 @@ describe('plugin inventory hash', () => {
     const active = pluginInventoryHash([{ packageName: 'p', status: 'active' }])
     const disabled = pluginInventoryHash([{ packageName: 'p', status: 'disabled' }])
     expect(active).not.toBe(disabled)
+  })
+})
+
+describe('projection batch sequence and heartbeat', () => {
+  it('numbers batches with a strictly increasing seq across flushes', async () => {
+    const { reporter, requests, setNetworkFailed } = buildReporter()
+    setNetworkFailed(true)
+    reporter.sessionStarted('sess-1')
+    reporter.sessionEnded('sess-1')
+    setNetworkFailed(false)
+    await expect(reporter.flush()).resolves.toBe(true)
+    // The backlog drains as one batch carrying the first sequence number.
+    expect(requests).toHaveLength(1)
+    expect(parseBatch(requests[0]?.body ?? '{}').seq).toBe(1)
+    // The next flush continues the sequence — clear() does not reset it.
+    reporter.clear()
+    reporter.sessionStarted('sess-2')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
+    expect(parseBatch(requests[1]?.body ?? '{}').seq).toBe(2)
+  })
+
+  it('rebases onto the server cursor on 409 stale_seq and retries the same batch once', async () => {
+    const { reporter, requests } = buildReporter({
+      responses: [
+        { status: 409, text: JSON.stringify({ error: 'stale_seq', lastSeq: 7 }) },
+        { status: 201 },
+      ],
+    })
+    reporter.sessionStarted('sess-1')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
+    expect(requests).toHaveLength(2)
+    // The refused batch carried the local seq; the retry carried the rebased
+    // one and shipped exactly the same events.
+    expect(parseBatch(requests[0]?.body ?? '{}').seq).toBe(1)
+    const retried = parseBatch(requests[1]?.body ?? '{}')
+    expect(retried.seq).toBe(8)
+    expect(retried.events).toEqual(parseBatch(requests[0]?.body ?? '{}').events)
+    // The following batch continues from the rebased cursor.
+    reporter.sessionEnded('sess-1')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
+    expect(parseBatch(requests[2]?.body ?? '{}').seq).toBe(9)
+  })
+
+  it('keeps the queue when a 409 carries no usable cursor (retries later)', async () => {
+    const { reporter, requests } = buildReporter({
+      responses: [
+        { status: 409, text: 'not json' },
+        { status: 201 },
+      ],
+    })
+    reporter.sessionStarted('sess-1')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(false)
+    expect(reporter.pendingCount).toBe(1)
+    reporter.sessionEnded('sess-1')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
+    // Both flush attempts used the same next seq (the refusal must not have
+    // advanced the local counter), and the second attempt succeeded.
+    expect(parseBatch(requests[0]?.body ?? '{}').seq).toBe(1)
+    expect(parseBatch(requests[1]?.body ?? '{}').seq).toBe(1)
+  })
+
+  it('synthesizes a heartbeat row for the renewal submit when nothing is pending', async () => {
+    const { reporter, requests } = buildReporter()
+    await expect(reporter.submitHeartbeat()).resolves.toBe(true)
+    expect(requests).toHaveLength(1)
+    const batch = parseBatch(requests[0]?.body ?? '{}')
+    expect(batch.seq).toBe(1)
+    expect(batch.events).toEqual([
+      { sessionId: HEARTBEAT_SESSION_ID, eventType: 'heartbeat', occurredAt: 1_700_000_000_000 },
+    ])
+    // A subsequent heartbeat continues the sequence.
+    await expect(reporter.submitHeartbeat()).resolves.toBe(true)
+    expect(parseBatch(requests[1]?.body ?? '{}').seq).toBe(2)
+  })
+
+  it('carries the last known session id on synthesized heartbeats', async () => {
+    const { reporter, requests } = buildReporter()
+    reporter.sessionStarted('sess-9')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
+    await expect(reporter.submitHeartbeat()).resolves.toBe(true)
+    const heartbeat = parseBatch(requests[1]?.body ?? '{}').events[0]
+    expect(heartbeat).toMatchObject({ sessionId: 'sess-9', eventType: 'heartbeat' })
+  })
+
+  it('flushes pending session events as-is on submitHeartbeat without synthesizing', async () => {
+    const { reporter, requests, setAccessToken } = buildReporter({ accessToken: undefined })
+    reporter.sessionStarted('sess-1')
+    await reporter.flush()
+    expect(reporter.pendingCount).toBe(1)
+    setAccessToken('at-1')
+    await expect(reporter.submitHeartbeat()).resolves.toBe(true)
+    expect(requests).toHaveLength(1)
+    const events = parseBatch(requests[0]?.body ?? '{}').events
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ eventType: 'session.start', sessionId: 'sess-1' })
+  })
+
+  it('sends nothing on submitHeartbeat while the policy is off', async () => {
+    const { reporter, requests } = buildReporter({ responses: [{ status: 404 }] })
+    reporter.sessionStarted('sess-1')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(false)
+    expect(reporter.policyState).toBe('off')
+    const before = requests.length
+    await expect(reporter.submitHeartbeat()).resolves.toBe(false)
+    expect(requests).toHaveLength(before)
   })
 })
 

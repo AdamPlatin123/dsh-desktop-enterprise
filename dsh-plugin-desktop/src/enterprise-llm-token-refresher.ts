@@ -12,7 +12,13 @@
  * 3. transient failures (network, 5xx, malformed) back off exponentially and
  *    never disturb the user while the previous token is still valid;
  * 4. a 401 means the OAuth session itself is gone — the loop stops and the
- *    gate-guided re-login takes over.
+ *    gate-guided re-login takes over;
+ * 5. weak binding (organization policy `desktopEvents=on`): a projection
+ *    batch is submitted right before every issuance — pending session
+ *    events, otherwise one synthesized heartbeat row — so the renewal's
+ *    presence signal reaches the gateway first; a `409 heartbeat_stale`
+ *    answer is answered with one immediate re-submit + one renewal retry,
+ *    and only a second refusal hands over to re-login.
  */
 
 import { EnterpriseLlmTokenError, type EnterpriseLlmToken } from './enterprise-llm-tokens.ts'
@@ -40,6 +46,18 @@ export interface EnterpriseLlmTokenRefresherDeps {
   readonly log?: EnterpriseLlmTokenRefresherLog
   /** Invoked once on 401: the OAuth session is gone; re-login takes over. */
   readonly onUnauthorized: (cause: EnterpriseLlmTokenError) => void
+  /**
+   * Weak binding: submit the renewal-time projection batch right before
+   * each issuance (pending session events, otherwise one heartbeat row).
+   * Optional — deployments without an organization gateway skip it.
+   */
+  readonly submitProjection?: () => Promise<boolean>
+  /**
+   * Invoked when a renewal stays `heartbeat_stale` even after an immediate
+   * projection re-submit and one retry: the presence chain is broken past
+   * self-healing, so re-login takes over (same gate-guided flow as 401).
+   */
+  readonly onSessionStale?: (cause: EnterpriseLlmTokenError) => void
 }
 
 const DEFAULT_MIN_DELAY_MS = 1_000
@@ -95,9 +113,14 @@ export class EnterpriseLlmTokenRefresher {
     const accessToken = await this.deps.readAccessToken().catch(() => undefined)
     if (this.stopped) return false
     if (accessToken === undefined || accessToken.length === 0) return false
-    let issued: EnterpriseLlmToken
+    // Weak binding: the renewal batch goes out right before the issuance so
+    // the gateway's liveness covers this renewal. A failed submit never
+    // blocks the renewal itself — if liveness has aged out the gate answers
+    // with its own stable error, and that path self-heals below.
+    await this.deps.submitProjection?.().catch(() => false)
     try {
-      issued = await this.deps.issue(accessToken)
+      const issued = await this.deps.issue(accessToken)
+      return this.applyAndSchedule(issued)
     } catch (cause) {
       if (this.stopped) return false
       if (cause instanceof EnterpriseLlmTokenError) {
@@ -110,20 +133,46 @@ export class EnterpriseLlmTokenRefresher {
           this.deps.log?.error('dsh-plugin-desktop: llm token issuance lacks the llm scope; contact the organization administrator')
           return false
         }
+        if (cause.code === 'heartbeat_stale') {
+          // Liveness aged out (a silent stretch past the window): submit one
+          // projection immediately and retry the renewal once — the OAuth
+          // session carries on. Only a second refusal escalates to re-login;
+          // this is never the blind backoff the transient path takes.
+          this.deps.log?.warn?.('dsh-plugin-desktop: llm token renewal reported heartbeat_stale; submitting projection and retrying once')
+          await this.deps.submitProjection?.().catch(() => false)
+          try {
+            const retried = await this.deps.issue(accessToken)
+            return this.applyAndSchedule(retried)
+          } catch (retryCause) {
+            if (this.stopped) return false
+            if (retryCause instanceof EnterpriseLlmTokenError) {
+              if (retryCause.code === 'unauthorized') {
+                this.deps.log?.error('dsh-plugin-desktop: the organization session was rejected during llm token issuance; guiding re-login')
+                this.deps.onUnauthorized(retryCause)
+                return false
+              }
+              if (retryCause.code === 'heartbeat_stale') {
+                this.deps.log?.error('dsh-plugin-desktop: llm token renewal still reports heartbeat_stale after a projection resubmit; guiding re-login')
+                this.deps.onSessionStale?.(retryCause)
+                return false
+              }
+            }
+            return this.backOffTransient(retryCause)
+          }
+        }
       }
-      // Transient: back off and try again; the previous token keeps serving
-      // until it expires, so the user is never disturbed for a blip.
-      const base = this.deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
-      const max = this.deps.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS
-      const delay = Math.min(base * 2 ** this.backoffExponent, max)
-      this.backoffExponent += 1
-      this.deps.log?.warn?.(`dsh-plugin-desktop: llm token issuance failed (${cause instanceof Error ? cause.message : String(cause)}); retrying in ${String(Math.round(delay / 1000))}s`)
-      this.schedule(delay)
-      return false
+      return this.backOffTransient(cause)
     }
-    // A stop() (sign-out teardown) may land while the issuance was in flight;
-    // the write points are already cleared then, so the fresh token must not
-    // resurrect them for an account that just signed out.
+  }
+
+  /**
+   * Shared success tail: apply the fresh token hot and schedule the next
+   * renewal at half the remaining TTL. A stop() (sign-out teardown) that
+   * landed while the issuance was in flight applies nothing — the write
+   * points are already cleared then, and the fresh token must not resurrect
+   * them for an account that just signed out.
+   */
+  private applyAndSchedule(issued: EnterpriseLlmToken): boolean {
     if (this.stopped) return false
     this.backoffExponent = 0
     this.deps.apply(issued)
@@ -131,5 +180,16 @@ export class EnterpriseLlmTokenRefresher {
     const halfLife = Math.max(Math.floor((issued.expiresAt - now) / 2), this.deps.minDelayMs ?? DEFAULT_MIN_DELAY_MS)
     this.schedule(halfLife)
     return true
+  }
+
+  /** Transient-failure path: exponential backoff, previous token keeps serving. */
+  private backOffTransient(cause: unknown): boolean {
+    const base = this.deps.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
+    const max = this.deps.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS
+    const delay = Math.min(base * 2 ** this.backoffExponent, max)
+    this.backoffExponent += 1
+    this.deps.log?.warn?.(`dsh-plugin-desktop: llm token issuance failed (${cause instanceof Error ? cause.message : String(cause)}); retrying in ${String(Math.round(delay / 1000))}s`)
+    this.schedule(delay)
+    return false
   }
 }

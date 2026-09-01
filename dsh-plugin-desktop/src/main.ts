@@ -965,6 +965,13 @@ async function start(): Promise<void> {
         now: () => Date.now(),
         log: electronLogger,
         onUnauthorized: () => { void enterpriseGate?.requestReauth('session-expired') },
+        // Weak binding: every renewal first ships the projection batch (the
+        // pending session events, or one synthesized heartbeat row) so the
+        // gateway's liveness covers the renewal about to happen.
+        submitProjection: () => enterpriseProjection?.submitHeartbeat() ?? Promise.resolve(false),
+        // A renewal that stays heartbeat_stale after an immediate resubmit
+        // cannot self-heal — the presence chain is broken; re-login rebuilds it.
+        onSessionStale: () => { void enterpriseGate?.requestReauth('session-expired') },
       })
       enterpriseLlmRefresher.start()
     }

@@ -8,9 +8,10 @@ interface HarnessOptions {
   readonly failWith?: () => unknown
   readonly retryDelayMs?: number
   readonly maxRetryDelayMs?: number
+  readonly submitProjection?: () => Promise<boolean>
 }
 
-function harness({ signedOut = false, issued, failWith, retryDelayMs, maxRetryDelayMs }: HarnessOptions = {}) {
+function harness({ signedOut = false, issued, failWith, retryDelayMs, maxRetryDelayMs, submitProjection }: HarnessOptions = {}) {
   let currentMs = 1_000_000
   const applied: EnterpriseLlmToken[] = []
   const issue = vi.fn(async (): Promise<EnterpriseLlmToken> => {
@@ -21,6 +22,7 @@ function harness({ signedOut = false, issued, failWith, retryDelayMs, maxRetryDe
   })
   const apply = vi.fn((token: EnterpriseLlmToken) => { applied.push(token) })
   const onUnauthorized = vi.fn()
+  const onSessionStale = vi.fn()
   const log = { error: vi.fn(), warn: vi.fn() }
   const refresher = new EnterpriseLlmTokenRefresher({
     gatewayUrl: 'https://gateway.example.com',
@@ -30,8 +32,10 @@ function harness({ signedOut = false, issued, failWith, retryDelayMs, maxRetryDe
     now: () => currentMs,
     ...(retryDelayMs === undefined ? {} : { retryDelayMs }),
     ...(maxRetryDelayMs === undefined ? {} : { maxRetryDelayMs }),
+    ...(submitProjection === undefined ? {} : { submitProjection }),
     log,
     onUnauthorized,
+    onSessionStale,
   })
   return {
     refresher,
@@ -39,6 +43,7 @@ function harness({ signedOut = false, issued, failWith, retryDelayMs, maxRetryDe
     apply,
     applied,
     onUnauthorized,
+    onSessionStale,
     log,
     advance: (ms: number) => { currentMs += ms },
   }
@@ -199,6 +204,109 @@ describe('enterprise llm token refresher', () => {
     await vi.advanceTimersByTimeAsync(1)
     await flush()
     expect(state.issue).toHaveBeenCalledTimes(2)
+    state.refresher.stop()
+  })
+})
+
+describe('enterprise llm token refresher (weak binding: projection before renewal)', () => {
+  const stale = (): EnterpriseLlmTokenError => new EnterpriseLlmTokenError('heartbeat_stale', 'liveness window aged out')
+
+  it('submits the projection batch before every issuance', async () => {
+    const order: string[] = []
+    const state = harness({
+      submitProjection: async () => {
+        order.push('submit')
+        return true
+      },
+    })
+    state.issue.mockImplementation(async () => {
+      order.push('issue')
+      return { token: `v1.g${String(state.issue.mock.calls.length)}`, expiresAt: 9_000_000, generation: state.issue.mock.calls.length }
+    })
+    state.refresher.start()
+    await flush()
+    expect(order).toEqual(['submit', 'issue'])
+    state.refresher.stop()
+  })
+
+  it('answers heartbeat_stale with an immediate resubmit and one renewal retry, then succeeds', async () => {
+    let attempts = 0
+    const order: string[] = []
+    const state = harness({
+      submitProjection: async () => {
+        order.push('submit')
+        return true
+      },
+    })
+    state.issue.mockImplementation(async () => {
+      order.push('issue')
+      attempts += 1
+      if (attempts === 1) throw stale()
+      return { token: 'v1.recovered', expiresAt: 9_000_000, generation: 2 }
+    })
+    state.refresher.start()
+    await flush()
+    // Two issuances total (the refused one + the retry), and a submit before
+    // each — the recovery submit goes out right after the refusal, not on a
+    // backoff schedule.
+    expect(state.issue).toHaveBeenCalledTimes(2)
+    expect(order).toEqual(['submit', 'issue', 'submit', 'issue'])
+    expect(state.applied.map(token => token.token)).toEqual(['v1.recovered'])
+    expect(state.onSessionStale).not.toHaveBeenCalled()
+    expect(state.onUnauthorized).not.toHaveBeenCalled()
+    state.refresher.stop()
+  })
+
+  it('guides re-login when the renewal stays heartbeat_stale after the resubmit', async () => {
+    const state = harness({ failWith: stale })
+    state.refresher.start()
+    await flush()
+    // Exactly one immediate resubmit + retry; then the escalation, and the
+    // loop stops (no backoff timer, no further attempts).
+    expect(state.issue).toHaveBeenCalledTimes(2)
+    expect(state.onSessionStale).toHaveBeenCalledTimes(1)
+    expect(state.onUnauthorized).not.toHaveBeenCalled()
+    expect(state.apply).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(600_000)
+    await flush()
+    expect(state.issue).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('still guides re-login on a 401 that lands during the heartbeat_stale retry', async () => {
+    let attempts = 0
+    const state = harness({})
+    state.issue.mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) throw stale()
+      throw new EnterpriseLlmTokenError('unauthorized', 'rejected on retry')
+    })
+    state.refresher.start()
+    await flush()
+    expect(state.onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(state.onSessionStale).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('falls back to transient backoff when the heartbeat_stale retry fails for another reason', async () => {
+    let attempts = 0
+    const state = harness({ retryDelayMs: 1_000 })
+    state.issue.mockImplementation(async () => {
+      attempts += 1
+      if (attempts === 1) throw stale()
+      if (attempts === 2) throw new Error('gateway unreachable')
+      return { token: 'v1.after-retry', expiresAt: 9_000_000, generation: 3 }
+    })
+    state.refresher.start()
+    await flush()
+    expect(state.issue).toHaveBeenCalledTimes(2)
+    expect(state.onSessionStale).not.toHaveBeenCalled()
+    expect(state.onUnauthorized).not.toHaveBeenCalled()
+    expect(state.log.warn).toHaveBeenCalledWith(expect.stringContaining('retrying in 1s'))
+    await vi.advanceTimersByTimeAsync(1_000)
+    await flush()
+    expect(state.issue).toHaveBeenCalledTimes(3)
+    expect(state.applied).toHaveLength(1)
     state.refresher.stop()
   })
 })
