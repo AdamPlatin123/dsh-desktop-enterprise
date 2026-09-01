@@ -8,6 +8,7 @@
  */
 declare const __DSH_ENTERPRISE_GATEWAY_URL__: string | undefined
 declare const __DSH_ENTERPRISE_OAUTH_CLIENT_ID__: string | undefined
+declare const __DSH_ENTERPRISE_TELEMETRY__: string | undefined
 
 const BIN_NAME = 'dsh-plugin-desktop'
 
@@ -17,6 +18,8 @@ export const ENTERPRISE_OAUTH_SCOPE = 'openid session llm'
 /** Runtime override channels for unpackaged development and tests; presets stay primary. */
 export const ENTERPRISE_GATEWAY_URL_OVERRIDE = 'DSH_ENTERPRISE_GATEWAY_URL'
 export const ENTERPRISE_OAUTH_CLIENT_ID_OVERRIDE = 'DSH_ENTERPRISE_OAUTH_CLIENT_ID'
+/** Runtime override for the telemetry preset (unpackaged development and tests). */
+export const ENTERPRISE_TELEMETRY_OVERRIDE = 'DSH_ENTERPRISE_TELEMETRY'
 
 /**
  * Stable outcome of preset resolution. `missing` and `invalid` both route the
@@ -89,4 +92,21 @@ export function resolveEnterpriseGatewayPreset(
       detail: cause instanceof Error ? cause.message : String(cause),
     })
   }
+}
+
+function buildTimeTelemetry(): string {
+  return typeof __DSH_ENTERPRISE_TELEMETRY__ === 'undefined' ? '' : __DSH_ENTERPRISE_TELEMETRY__
+}
+
+/**
+ * Resolve the minimal-telemetry preset (R36/R10). Telemetry is off unless
+ * the deployment explicitly presets `on` at build time — the compliance
+ * default is closed, and the runtime override exists only so unpackaged
+ * development and the headless test suite can turn it on without a rebuild.
+ */
+export function resolveEnterpriseTelemetryPolicy(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): 'on' | 'off' {
+  const raw = (env[ENTERPRISE_TELEMETRY_OVERRIDE] ?? buildTimeTelemetry()).trim().toLowerCase()
+  return raw === 'on' ? 'on' : 'off'
 }

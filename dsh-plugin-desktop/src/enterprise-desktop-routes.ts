@@ -33,6 +33,12 @@ export interface DesktopEnterpriseSurface {
   readonly adminConsoleUrl: () => string | undefined
   /** Open the admin console in the system browser; rejections propagate (F1). */
   readonly openAdminConsole: (url: string) => Promise<void>
+  /**
+   * R39 client half: the Host side contributes the plugin inventory hash once
+   * its inventory is known; the reporter attaches it to the next projection
+   * event. Optional so older launchers stay composition-compatible.
+   */
+  readonly setPluginInventoryHash?: (hash: string) => void
 }
 
 /**

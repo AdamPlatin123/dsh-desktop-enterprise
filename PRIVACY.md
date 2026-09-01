@@ -2,7 +2,7 @@
 
 [中文](PRIVACY.zh.md)
 
-- **Version:** 2.0 (enterprise deployment edition)
+- **Version:** 2.1 (enterprise deployment edition)
 - **Effective and last updated:** September 1, 2026
 
 This policy describes the DSH Desktop **enterprise build** — an internal, self-hosted deployment of the DSH Enterprise platform's desktop client. It replaces the upstream community privacy policy for this build: the official community distribution and the `dshdesktop.cn` online services are **not** involved in any data flow described here.
@@ -22,8 +22,9 @@ This policy covers the desktop client built from this repository when it is conf
 - All model and tool traffic goes to **your organization's gateway** (the preset `DSH_ENTERPRISE_GATEWAY_URL`). No third-party model service is configured by this build.
 - **Update checks are off by default.** No production code path can reach the upstream public update service: the update preset resolver rejects that domain and its subdomains outright, and version checks and installer downloads run only if the deployment presets a self-hosted update origin (`DSH_ENTERPRISE_UPDATE_URL`). Nothing update-related is sent otherwise.
 - **Community marketplaces are disabled by default.** The market provider starts in the `disabled` state and contacts nothing until explicitly enabled.
-- **Telemetry is off by default.** A minimal privacy-telemetry module (client version, online status, error counts) ships ready but has no call site in this build; if a deployment later enables it, reports go only to the organization gateway.
-- The installation UUID is generated and stored locally. In the default configuration it **never leaves the device**; it is only sent to organization-run endpoints (preset update source or enabled telemetry), and never to any public upstream endpoint.
+- **Telemetry is off by default.** A minimal telemetry report (client version, online status, error counts — three fields, nothing else) is sent only if the deployment explicitly presets reporting on; reports go to the organization gateway alone and carry no installation identifier.
+- **Session reporting follows the organization's server-side policy; the client cannot turn it on by itself.** When the organization gateway enables the desktop session report, the client sends minimal session metadata — session start and end times and a plugin inventory hash — authenticated as the signed-in account. It never sends conversation titles, prompts, or token usage. While that policy is on, keeping a session active is also what keeps model access alive (Section 4).
+- The installation UUID is generated and stored locally. In the default configuration it **never leaves the device**; it is only sent to the organization-run preset update source (version checks), and never to any public upstream endpoint.
 - Sessions, credentials, logs, and crash files remain on the workstation by default; enterprise tokens are sealed in the operating-system keychain.
 
 ## 3. Enterprise gateway communication (the data plane)
@@ -40,16 +41,25 @@ The client's only always-on network relationship is with the organization gatewa
 
 The gateway receives standard network metadata (IP address, time, TLS details) with every request, as any server does. What it can associate with a person is governed by the organization's own server-side policy, which is outside this document's scope.
 
-## 4. Minimal telemetry (default off; endpoint pending server delivery)
+## 4. Minimal telemetry and session reporting (both default off)
 
-The build contains a telemetry reporter with exactly these fields, nothing more:
+### 4.1 Minimal telemetry
+
+The build contains a telemetry reporter with exactly these fields, nothing more — no installation UUID, no timestamp:
 
 - `clientVersion` — running client version;
 - `online` — whether the client currently reaches the gateway;
-- `errorCounts` — bounded per-kind error counters (labels limited to letters, digits, dot, underscore, hyphen; at most 32 kinds, saturating counts);
-- plus the installation UUID and a UTC timestamp.
+- `errorCounts` — bounded per-kind error counters (labels limited to letters, digits, dot, underscore, hyphen; at most 32 kinds, saturating counts).
 
-In this build the reporter is **dormant**: no code constructs or configures it, so there is no telemetry egress. The receiving surface (`POST /api/desktop/telemetry` on the gateway) is delivered by the governance server workstream; only after that surface exists and a deployment explicitly wires reporting on would reports start — and they go to the organization gateway only. Upstream session telemetry (`DSH_TELEMETRY_MODE`) remains `DISABLED` in the default composition; if an operator explicitly sets it, that traffic follows the upstream configuration and recipient.
+The reporter stays dormant unless **both** hold: the build is configured against the organization gateway, and the deployment explicitly presets the telemetry switch on (`DSH_ENTERPRISE_TELEMETRY=on`; a runtime override of the same name exists for unpackaged development). When enabled, a report is sent periodically to `POST /api/desktop/telemetry` on the organization gateway, authenticated with the signed-in account's OAuth access token — the gateway can therefore associate a report with the employee account, and with nothing else: the payload carries no device or installation identifier. Upstream session telemetry (`DSH_TELEMETRY_MODE`) remains `DISABLED` in the default composition; if an operator explicitly sets it, that traffic follows the upstream configuration and recipient.
+
+### 4.2 Desktop session reporting (organization policy)
+
+Separately, the gateway exposes an organization policy for desktop session reporting. The client discovers the policy from the gateway's answers rather than presuming it:
+
+- **Policy off** (every deployment that has not enabled it): the client sends nothing. The reporting module stays silent and drops anything it had queued, re-checking the policy only at the next sign-in.
+- **Policy on**: when a session is established and when it ends, the client posts a small batch to `POST /api/sessions/desktop-events`, authenticated as the signed-in account, containing the session's start and end times, a SHA-256 hash of the installed plugin-bundle inventory, and per-category tool-use counters if any were recorded (this build records none today). It never contains conversation titles, prompts, parameter values, model output, or token usage.
+- **Weak binding**: while the policy is on, the organization also requires that report stream for model access — renewing the short-lived desktop model token needs a recent report. A first sign-in is exempt; if the report stream stalls, renewal is refused with a `heartbeat_stale` answer and the previously issued token keeps working until it expires. In short: while reporting is on, keeping a session active is what keeps model access alive, and no traffic beyond the report itself is introduced.
 
 ## 5. Update checks and the installation UUID (default off; self-hosted only)
 
@@ -92,7 +102,7 @@ Letting DSH open in a browser lets that browser reach the Host on your machine; 
 
 - Sign out to invalidate the local session and clear the signed-in state.
 - Update checks stay off unless your deployment presets a source; there is no user-facing switch in this build by design.
-- Telemetry is off unless your organization explicitly turns it on after the server side ships.
+- Telemetry is off unless your deployment explicitly presets it on. Session reporting follows the organization's server-side policy: while it is on, signing out ends both the report stream and model access; while it is off, the client sends nothing.
 - Local data is removable per Section 7; deleting the installation UUID causes a new one at next launch.
 
 ## 10. Contact and changes

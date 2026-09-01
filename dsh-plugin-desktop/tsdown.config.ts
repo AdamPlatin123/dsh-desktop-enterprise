@@ -12,6 +12,9 @@ const enterpriseDefines = {
   __DSH_ENTERPRISE_GATEWAY_URL__: JSON.stringify(process.env.DSH_ENTERPRISE_GATEWAY_URL ?? ''),
   __DSH_ENTERPRISE_OAUTH_CLIENT_ID__: JSON.stringify(process.env.DSH_ENTERPRISE_OAUTH_CLIENT_ID ?? ''),
   __DSH_ENTERPRISE_UPDATE_URL__: JSON.stringify(process.env.DSH_ENTERPRISE_UPDATE_URL ?? ''),
+  // R36/R10 minimal telemetry preset: empty string = off (the compliance
+  // default); deployments opt in by baking DSH_ENTERPRISE_TELEMETRY=on.
+  __DSH_ENTERPRISE_TELEMETRY__: JSON.stringify(process.env.DSH_ENTERPRISE_TELEMETRY ?? ''),
 }
 
 export default defineConfig([

@@ -7,7 +7,10 @@
  * renewal is another POST, so the desktop chain re-issues with whatever OAuth
  * access token is current at half-life. Failures follow RFC 6750: a 401 means
  * the OAuth session itself is gone (the caller guides re-login), a 403 means
- * the session lacks the `llm` scope, and anything else is transient.
+ * the session lacks the `llm` scope, a 409 with `heartbeat_stale` means the
+ * organization's weak-binding policy wants a fresher projection report (the
+ * chain retries later — the previously issued token stays valid), and
+ * anything else is transient.
  */
 
 /** Minimal HTTP transport; tests substitute a recording fake. */
@@ -19,6 +22,7 @@ export type EnterpriseLlmTokenTransport = (
 export type EnterpriseLlmTokenErrorCode =
   | 'unauthorized'
   | 'insufficient_scope'
+  | 'heartbeat_stale'
   | 'unavailable'
   | 'http'
   | 'malformed'
@@ -98,6 +102,14 @@ async function raiseForStatus(status: number, text: string): Promise<never> {
   if (status === 403) {
     throw new EnterpriseLlmTokenError('insufficient_scope', 'llm token issuance requires the llm scope', {
       ...(serverCode === undefined ? {} : { serverCode }),
+    })
+  }
+  if (status === 409 && serverCode === 'heartbeat_stale') {
+    // R39 weak binding: the gateway wants a fresher projection report before
+    // renewing. Transient by design — the chain retries at its next half-life
+    // tick and the previously issued token remains valid until then.
+    throw new EnterpriseLlmTokenError('heartbeat_stale', 'llm token renewal waits for a fresher session report', {
+      serverCode,
     })
   }
   if (status === 503) {

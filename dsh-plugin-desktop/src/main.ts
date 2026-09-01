@@ -165,7 +165,16 @@ import {
 } from './enterprise-token-store.ts'
 import {
   resolveEnterpriseGatewayPreset,
+  resolveEnterpriseTelemetryPolicy,
 } from './enterprise-gateway-preset.ts'
+import {
+  EnterpriseProjectionReporter,
+  pluginInventoryHash,
+} from './enterprise-projection.ts'
+import {
+  EnterpriseTelemetryReporter,
+  EnterpriseTelemetryScheduler,
+} from './enterprise-telemetry.ts'
 import {
   enterpriseAdminConsoleUrl,
 } from './enterprise-desktop-routes.ts'
@@ -966,6 +975,56 @@ async function start(): Promise<void> {
       delete process.env.DSH_LLM_TOKEN
     }
 
+    // Enterprise telemetry (R36/R10) — dormant unless the deployment presets
+    // the switch on. When configured, the reporter sends the three facets with
+    // the current OAuth access token on a 15-minute cadence while a session
+    // is live; sign-out stops the scheduler.
+    const enterpriseTelemetryReporter = new EnterpriseTelemetryReporter({ log: electronLogger })
+    if (enterpriseGatewayUrl !== undefined && resolveEnterpriseTelemetryPolicy(process.env) === 'on') {
+      enterpriseTelemetryReporter.configure({
+        gatewayUrl: enterpriseGatewayUrl,
+        clientVersion: appVersion,
+        readAccessToken: async () => {
+          try {
+            return (await readEnterpriseTokens(marketUserDataDir, desktopLanHttpsPrivateKeyProtector()))?.accessToken
+          } catch {
+            return undefined
+          }
+        },
+      })
+    }
+    let enterpriseTelemetryScheduler: EnterpriseTelemetryScheduler | undefined
+
+    // Enterprise session projection (R39 third layer, client half): session
+    // start/end plus a plugin inventory hash, sent only while the gateway's
+    // policy accepts them. The reporter discovers the policy by itself (404 =
+    // silent) and queues nothing once the deployment answers "off".
+    const enterpriseProjection = enterpriseGatewayUrl === undefined ? undefined : new EnterpriseProjectionReporter({
+      gatewayUrl: enterpriseGatewayUrl,
+      readAccessToken: async () => {
+        try {
+          return (await readEnterpriseTokens(marketUserDataDir, desktopLanHttpsPrivateKeyProtector()))?.accessToken
+        } catch {
+          return undefined
+        }
+      },
+      log: electronLogger,
+    })
+    let enterpriseSessionId: string | undefined
+    const establishEnterpriseSessionSurfaces = (): void => {
+      if (enterpriseProjection === undefined) return
+      enterpriseSessionId = randomUUID()
+      enterpriseProjection.sessionStarted(enterpriseSessionId)
+    }
+    const teardownEnterpriseSessionSurfaces = (): void => {
+      enterpriseTelemetryScheduler?.stop()
+      enterpriseTelemetryScheduler = undefined
+      if (enterpriseProjection !== undefined && enterpriseSessionId !== undefined) {
+        enterpriseProjection.sessionEnded(enterpriseSessionId)
+        enterpriseSessionId = undefined
+      }
+    }
+
     // Enterprise gate (D4-1): a missing or expired organization session blocks
     // Host boot behind the login window. The launcher's single-instance lock
     // (R19) routes second-instance activations to this gate's window.
@@ -980,11 +1039,26 @@ async function start(): Promise<void> {
       openExternal: url => shell.openExternal(url),
       copyToClipboard: text => { clipboard.writeText(text) },
       logger: electronLogger,
-      onSessionEstablished: () => establishEnterpriseLlmToken(),
-      onSessionEnded: () => teardownEnterpriseLlmToken(),
+      onSessionEstablished: () => {
+        establishEnterpriseLlmToken()
+        establishEnterpriseSessionSurfaces()
+        if (enterpriseTelemetryReporter.enabled) {
+          enterpriseTelemetryScheduler?.stop()
+          enterpriseTelemetryScheduler = new EnterpriseTelemetryScheduler({
+            flush: () => enterpriseTelemetryReporter.flush(),
+            log: electronLogger,
+          })
+          enterpriseTelemetryScheduler.start()
+        }
+      },
+      onSessionEnded: () => {
+        teardownEnterpriseLlmToken()
+        teardownEnterpriseSessionSurfaces()
+      },
     })
     generation.own(() => {
       teardownEnterpriseLlmToken()
+      teardownEnterpriseSessionSurfaces()
       enterpriseGate?.dispose()
     })
     const enterpriseResult = await enterpriseGate.run()
@@ -1179,6 +1253,10 @@ async function start(): Promise<void> {
           // ask for it to be opened — never choose the target.
           adminConsoleUrl: () => enterpriseAdminConsoleUrl(enterpriseGatewayUrl, enterpriseGate?.getIdentity()),
           openAdminConsole: url => shell.openExternal(url),
+          // R39 client half: the Host side contributes the plugin inventory
+          // hash once its inventory is known; the reporter attaches it to the
+          // next projection event.
+          setPluginInventoryHash: hash => { enterpriseProjection?.setPluginHash(hash) },
         })
         await hostCtx.plugin(DesktopActionsService, {
           openTerminal: () => { runtime.openTerminal() },
@@ -1191,6 +1269,16 @@ async function start(): Promise<void> {
             statePath: pluginManagementStatePath,
             installAnchor: desktopInstallAnchor(),
           })
+          // R39 client half: once the Host inventory exists, hand its hash to
+          // the projection reporter (attached to the next reported event).
+          const plugins = hostCtx.get('desktopPlugins') as { list(): ReadonlyArray<{ readonly packageName: string, readonly status: string }> } | undefined
+          if (plugins !== undefined) {
+            try {
+              enterpriseProjection?.setPluginHash(pluginInventoryHash(plugins.list()))
+            } catch (cause) {
+              electronLogger.error(`${BIN_NAME}: the plugin inventory hash could not be computed: ${cause instanceof Error ? cause.message : String(cause)}`)
+            }
+          }
         }
         if (logSink !== undefined) {
           fileExporter = new FileExporter(logSink)

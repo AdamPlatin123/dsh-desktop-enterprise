@@ -67,6 +67,24 @@ describe('enterprise llm token client', () => {
       .rejects.toMatchObject({ code: 'http', serverCode: 'internal' })
   })
 
+  it('maps the weak-binding 409 onto the heartbeat_stale code', async () => {
+    // R39: the gateway defers renewal until a fresher projection report
+    // arrives. The error is typed so the chain can retry at its next
+    // half-life instead of tearing the session down.
+    const stale = async (): Promise<{ status: number, text: string }> =>
+      ({ status: 409, text: JSON.stringify({ error: 'heartbeat_stale', message: 'report pending' }) })
+    const failure = await issueEnterpriseLlmToken(stale, { gatewayUrl: GATEWAY, accessToken: 'a' })
+      .catch((cause: unknown) => cause)
+    expect(failure).toBeInstanceOf(EnterpriseLlmTokenError)
+    expect(failure).toMatchObject({ code: 'heartbeat_stale', serverCode: 'heartbeat_stale' })
+
+    // A 409 without the stable server code stays a generic HTTP failure.
+    const bareConflict = async (): Promise<{ status: number, text: string }> =>
+      ({ status: 409, text: JSON.stringify({ error: 'conflict' }) })
+    await expect(issueEnterpriseLlmToken(bareConflict, { gatewayUrl: GATEWAY, accessToken: 'a' }))
+      .rejects.toMatchObject({ code: 'http', serverCode: 'conflict' })
+  })
+
   it('rejects malformed success bodies with a typed error', async () => {
     for (const text of ['not json', 'null', '[1,2]', '{"expiresAt": 5}', '{"token": ""}', '{"token": "t", "expiresAt": "soon"}']) {
       const transport = async (): Promise<{ status: number, text: string }> => ok(text)

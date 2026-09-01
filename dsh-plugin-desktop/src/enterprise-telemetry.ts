@@ -1,19 +1,24 @@
 /**
  * Enterprise telemetry client (R10 minimal privacy telemetry): client version,
- * online status, and error counters, reported to the organization gateway.
+ * online status, and error counters, reported to the organization gateway at
+ * `POST /api/desktop/telemetry` with the current OAuth access token — the
+ * gateway identifies the report by the organization account behind the token,
+ * so the payload itself carries no installation identifier.
  *
- * The module is client-ready but deliberately dormant: nothing in the
- * application constructs a reporter yet. The reporting endpoint
- * (`POST /api/desktop/telemetry`) ships with the gateway side (T17); until a
- * deployment turns the surface on there, Desktop performs zero telemetry
- * egress — the compliance default is closed.
+ * The module stays dormant unless a deployment presets the telemetry switch
+ * (`resolveEnterpriseTelemetryPolicy`, default off): construction alone
+ * performs zero network activity, and even a configured reporter only sends
+ * on the scheduler's tick.
  */
 
-/** Gateway path that will receive telemetry reports (server side: T17). */
+/** Gateway path that receives telemetry reports (server side: R36). */
 export const DESKTOP_ENTERPRISE_TELEMETRY_PATH = '/api/desktop/telemetry'
 
 /** Fetch-compatible transport for one telemetry report; injectable for tests. */
-export type EnterpriseTelemetryTransport = (url: string, init: RequestInit) => Promise<Response>
+export type EnterpriseTelemetryTransport = (
+  url: string,
+  init: { readonly method: 'POST', readonly headers: Record<string, string>, readonly body: string },
+) => Promise<{ readonly status: number, readonly text: string }>
 
 /** The three reported facets and nothing else (R10: minimal privacy telemetry). */
 export interface EnterpriseTelemetrySnapshot {
@@ -25,13 +30,8 @@ export interface EnterpriseTelemetrySnapshot {
   readonly errorCounts: Readonly<Record<string, number>>
 }
 
-/** One complete report body as the gateway receives it. */
-export interface EnterpriseTelemetryPayload extends EnterpriseTelemetrySnapshot {
-  /** Installation UUID; visible to the gateway only while telemetry is on. */
-  readonly installationId: string
-  /** RFC 3339 UTC timestamp of the report. */
-  readonly sentAt: string
-}
+/** One complete report body as the gateway receives it (exactly the three facets). */
+export type EnterpriseTelemetryPayload = EnterpriseTelemetrySnapshot
 
 /** Maximum distinct error kinds retained before the oldest are coalesced. */
 export const MAX_TELEMETRY_ERROR_KINDS = 32
@@ -48,24 +48,20 @@ export function validateTelemetryErrorKind(kind: string): string {
 
 /**
  * Render one telemetry report as compact JSON.
- * @param input - installation identity, current snapshot, and report time.
+ * @param input - the current snapshot; the payload is exactly its three facets.
  * @returns the serialized payload ready for a POST body.
  */
 export function renderEnterpriseTelemetryPayload(input: {
-  readonly installationId: string
   readonly snapshot: EnterpriseTelemetrySnapshot
-  readonly sentAt: Date
 }): string {
   const errorCounts: Record<string, number> = {}
   for (const kind of Object.keys(input.snapshot.errorCounts).sort()) {
     errorCounts[kind] = input.snapshot.errorCounts[kind] ?? 0
   }
   const payload: EnterpriseTelemetryPayload = {
-    installationId: input.installationId,
     clientVersion: input.snapshot.clientVersion,
     online: input.snapshot.online === true,
     errorCounts,
-    sentAt: input.sentAt.toISOString(),
   }
   return JSON.stringify(payload)
 }
@@ -73,7 +69,6 @@ export function renderEnterpriseTelemetryPayload(input: {
 /** Dependencies of one telemetry reporter; all injectable for tests. */
 export interface EnterpriseTelemetryReporterOptions {
   readonly transport?: EnterpriseTelemetryTransport
-  readonly now?: () => Date
   readonly log?: { readonly error: (message: string) => void }
 }
 
@@ -81,10 +76,10 @@ export interface EnterpriseTelemetryReporterOptions {
 export interface EnterpriseTelemetryConfiguration {
   /** Organization gateway origin; reports go to `<gateway>/api/desktop/telemetry`. */
   readonly gatewayUrl: string
-  /** Installation UUID carried in every report. */
-  readonly installationId: string
   /** Running Desktop version string. */
   readonly clientVersion: string
+  /** Read the current OAuth access token (undefined while signed out). */
+  readonly readAccessToken: () => Promise<string | undefined>
 }
 
 /**
@@ -95,7 +90,6 @@ export interface EnterpriseTelemetryConfiguration {
  */
 export class EnterpriseTelemetryReporter {
   private readonly transport: EnterpriseTelemetryTransport
-  private readonly now: () => Date
   private readonly log: { readonly error: (message: string) => void } | undefined
   private configuration: EnterpriseTelemetryConfiguration | undefined
   private online = false
@@ -103,8 +97,10 @@ export class EnterpriseTelemetryReporter {
   private flushTask: Promise<boolean> | undefined
 
   constructor(options: EnterpriseTelemetryReporterOptions = {}) {
-    this.transport = options.transport ?? ((url, init) => globalThis.fetch(url, init))
-    this.now = options.now ?? (() => new Date())
+    this.transport = options.transport ?? (async (url, init) => {
+      const response = await fetch(url, { method: init.method, headers: init.headers, body: init.body, cache: 'no-store' })
+      return { status: response.status, text: await response.text() }
+    })
     this.log = options.log
   }
 
@@ -154,7 +150,8 @@ export class EnterpriseTelemetryReporter {
 
   /**
    * POST one report to the gateway. Dormant reporters resolve to false
-   * without any network activity; a failure is logged and reported as false
+   * without any network activity; so does a reporter without a current
+   * access token (signed out). A failure is logged and reported as false
    * so telemetry can never surface as a user-facing error.
    */
   flush(): Promise<boolean> {
@@ -162,23 +159,27 @@ export class EnterpriseTelemetryReporter {
     const configuration = this.configuration
     if (configuration === undefined) return Promise.resolve(false)
     const body = renderEnterpriseTelemetryPayload({
-      installationId: configuration.installationId,
       snapshot: this.snapshot(configuration.clientVersion),
-      sentAt: this.now(),
     })
     this.errorCounts.clear()
     const task = (async () => {
+      let accessToken: string | undefined
       try {
-        const response = await this.transport(
+        accessToken = await configuration.readAccessToken()
+      } catch {
+        accessToken = undefined
+      }
+      if (accessToken === undefined) return false
+      try {
+        const result = await this.transport(
           `${configuration.gatewayUrl}${DESKTOP_ENTERPRISE_TELEMETRY_PATH}`,
           {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            cache: 'no-store',
+            headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
             body,
           },
         )
-        return response.status >= 200 && response.status < 300
+        return result.status >= 200 && result.status < 300
       } catch (cause) {
         this.log?.error(`enterprise telemetry report failed: ${cause instanceof Error ? cause.message : String(cause)}`)
         return false
@@ -188,5 +189,64 @@ export class EnterpriseTelemetryReporter {
     })
     this.flushTask = task
     return task
+  }
+}
+
+/** Reporting cadence: one report every 15 minutes while a session is live. */
+export const ENTERPRISE_TELEMETRY_INTERVAL_MS = 15 * 60 * 1000
+
+/** Dependencies of the periodic telemetry scheduler; all injectable for tests. */
+export interface EnterpriseTelemetrySchedulerOptions {
+  readonly flush: () => Promise<boolean>
+  readonly intervalMs?: number
+  readonly log?: { readonly error: (message: string) => void }
+}
+
+/**
+ * Owns exactly one pending telemetry timer. `start` reports immediately and
+ * then on the fixed cadence; `stop` cancels the timer (sign-out, session
+ * loss). A stopped scheduler cannot be restarted — a fresh login builds a
+ * new one, mirroring the LLM token chain's per-session lifecycle.
+ */
+export class EnterpriseTelemetryScheduler {
+  private timer: ReturnType<typeof setTimeout> | undefined
+  private stopped = false
+  private readonly flush: () => Promise<boolean>
+  private readonly intervalMs: number
+  private readonly log: { readonly error: (message: string) => void } | undefined
+
+  constructor(options: EnterpriseTelemetrySchedulerOptions) {
+    this.flush = options.flush
+    this.intervalMs = options.intervalMs ?? ENTERPRISE_TELEMETRY_INTERVAL_MS
+    this.log = options.log
+  }
+
+  /** Flush once, then schedule the periodic reports. */
+  start(): void {
+    if (this.stopped) return
+    void this.flush().catch((cause: unknown) => {
+      this.log?.error(`enterprise telemetry report failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+    })
+    this.schedule()
+  }
+
+  /** Cancel the pending timer; the scheduler cannot be restarted afterwards. */
+  stop(): void {
+    this.stopped = true
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = undefined
+  }
+
+  private schedule(): void {
+    if (this.stopped) return
+    this.timer = setTimeout(() => {
+      this.timer = undefined
+      if (this.stopped) return
+      void this.flush().catch((cause: unknown) => {
+        this.log?.error(`enterprise telemetry report failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+      })
+      this.schedule()
+    }, this.intervalMs)
+    this.timer.unref?.()
   }
 }

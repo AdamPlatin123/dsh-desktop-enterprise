@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   ENTERPRISE_OAUTH_SCOPE,
   resolveEnterpriseGatewayPreset,
+  resolveEnterpriseTelemetryPolicy,
   validateEnterpriseGatewayUrl,
 } from '../src/enterprise-gateway-preset.ts'
 
@@ -47,5 +48,21 @@ describe('enterprise gateway preset', () => {
 
   it('keeps the enterprise OAuth scope stable for the server contract', () => {
     expect(ENTERPRISE_OAUTH_SCOPE).toBe('openid session llm')
+  })
+})
+
+describe('enterprise telemetry policy preset', () => {
+  it('is off unless the deployment explicitly presets on', () => {
+    // Compliance default: absent define and absent override stay closed.
+    expect(resolveEnterpriseTelemetryPolicy({})).toBe('off')
+    expect(resolveEnterpriseTelemetryPolicy({ DSH_ENTERPRISE_TELEMETRY: '' })).toBe('off')
+    expect(resolveEnterpriseTelemetryPolicy({ DSH_ENTERPRISE_TELEMETRY: 'on' })).toBe('on')
+  })
+
+  it('accepts the exact value case-insensitively and rejects everything else', () => {
+    expect(resolveEnterpriseTelemetryPolicy({ DSH_ENTERPRISE_TELEMETRY: ' ON ' })).toBe('on')
+    for (const candidate of ['true', '1', 'yes', 'On, plus extras', 'off']) {
+      expect(resolveEnterpriseTelemetryPolicy({ DSH_ENTERPRISE_TELEMETRY: candidate })).toBe('off')
+    }
   })
 })
