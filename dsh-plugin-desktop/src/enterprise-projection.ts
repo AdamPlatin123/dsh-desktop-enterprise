@@ -23,7 +23,7 @@
  * its own, and the next flush sends what is still honest to send.
  */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 /** Gateway path receiving projection batches (server side: R39). */
 export const DESKTOP_ENTERPRISE_PROJECTION_PATH = '/api/sessions/desktop-events'
@@ -42,13 +42,6 @@ export interface EnterpriseProjectionEvent {
   /** SHA-256 of the sorted direct plugin-bundle inventory, when known. */
   readonly pluginHash?: string
 }
-
-/**
- * Session id carried by synthesized heartbeat rows when no organization
- * session is open (the server only requires a non-empty label; heartbeats
- * assert presence, not a session lifecycle).
- */
-export const HEARTBEAT_SESSION_ID = 'heartbeat'
 
 /** Fetch-compatible transport for one projection batch; injectable for tests. */
 export type EnterpriseProjectionTransport = (
@@ -97,6 +90,12 @@ export class EnterpriseProjectionReporter {
    * rebase (server restart, another device) re-syncs it from the refusal.
    */
   private nextSeq = 1
+  /**
+   * Session id stamped onto synthesized heartbeat rows when no organization
+   * session is open — random per reporter instance (see the note above the
+   * event interface), never a fixed shared label.
+   */
+  private readonly heartbeatSessionId = randomUUID()
   /** Most recent organization session id; heartbeat rows carry it when set. */
   private lastSessionId: string | undefined
 
@@ -172,7 +171,7 @@ export class EnterpriseProjectionReporter {
   async submitHeartbeat(): Promise<boolean> {
     if (this.pending.length === 0 && this.policy !== 'off') {
       this.enqueue({
-        sessionId: this.lastSessionId ?? HEARTBEAT_SESSION_ID,
+        sessionId: this.lastSessionId ?? this.heartbeatSessionId,
         eventType: 'heartbeat',
         occurredAt: this.now(),
       })

@@ -3,7 +3,6 @@ import {
   DESKTOP_ENTERPRISE_PROJECTION_PATH,
   EnterpriseProjectionReporter,
   ENTERPRISE_PROJECTION_BATCH_LIMIT,
-  HEARTBEAT_SESSION_ID,
   MAX_PENDING_PROJECTION_EVENTS,
   pluginInventoryHash,
   type EnterpriseProjectionEvent,
@@ -307,11 +306,30 @@ describe('projection batch sequence and heartbeat', () => {
     const batch = parseBatch(requests[0]?.body ?? '{}')
     expect(batch.seq).toBe(1)
     expect(batch.events).toEqual([
-      { sessionId: HEARTBEAT_SESSION_ID, eventType: 'heartbeat', occurredAt: 1_700_000_000_000 },
+      { sessionId: expect.any(String), eventType: 'heartbeat', occurredAt: 1_700_000_000_000 },
     ])
-    // A subsequent heartbeat continues the sequence.
+    // The synthesized label is a random per-instance UUID, never a fixed
+    // shared value (composition reshuffles must not collide in the server's
+    // session-label namespace).
+    const sessionId = batch.events[0]?.sessionId
+    expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u)
+    // A subsequent heartbeat continues the sequence (and keeps the same
+    // instance label).
     await expect(reporter.submitHeartbeat()).resolves.toBe(true)
     expect(parseBatch(requests[1]?.body ?? '{}').seq).toBe(2)
+    expect(parseBatch(requests[1]?.body ?? '{}').events[0]?.sessionId).toBe(sessionId)
+  })
+
+  it('stamps heartbeats of different reporter instances with different labels', async () => {
+    const first = buildReporter()
+    const second = buildReporter()
+    await expect(first.reporter.submitHeartbeat()).resolves.toBe(true)
+    await expect(second.reporter.submitHeartbeat()).resolves.toBe(true)
+    const firstId = parseBatch(first.requests[0]?.body ?? '{}').events[0]?.sessionId
+    const secondId = parseBatch(second.requests[0]?.body ?? '{}').events[0]?.sessionId
+    expect(firstId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u)
+    expect(secondId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u)
+    expect(firstId).not.toBe(secondId)
   })
 
   it('carries the last known session id on synthesized heartbeats', async () => {
