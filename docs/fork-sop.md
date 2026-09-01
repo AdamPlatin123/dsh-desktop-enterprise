@@ -4,6 +4,8 @@
 
 配套脚本：`scripts/sync-upstream.sh`（默认 dry-run 检查，见第 5 节）。
 
+本文件记录 fork 一侧的升级纪律；服务端（网关）一侧的升级循环、两仓契约与发布顺序见 monorepo 企业分支的 `docs/enterprise/fork-upgrades.md`（`<monorepo>` 替换为组织的 monorepo 仓库路径）：`https://github.com/<monorepo>/blob/dsh-enterprise-d1/docs/enterprise/fork-upgrades.md`。两页互为对照：本页管「桌面如何跟上游与服务端演进」，该页管「网关先行、桌面其次」。
+
 ## 1. 上游 pin 记录
 
 | 项 | 值 | 落盘位置 |
