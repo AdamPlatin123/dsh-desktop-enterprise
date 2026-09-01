@@ -259,6 +259,18 @@ export class EnterpriseProjectionReporter {
           this.toolCounts.clear()
           continue
         }
+        if (status === 400 || status === 413) {
+          // Permanent shape rejection (invalid event, payload over the cap):
+          // retrying this batch can never succeed, and keeping it would
+          // block the queue head forever — under weak binding that starves
+          // the renewal liveness and degenerates into repeated forced
+          // re-logins. Drop the batch (the refused seq was never accepted,
+          // so the local counter stays put) and keep flushing the rest.
+          this.log?.error(`enterprise projection batch was rejected with HTTP ${String(status)} and dropped (${String(batch.length)} event(s))`)
+          this.pending.splice(0, batch.length)
+          this.toolCounts.clear()
+          continue
+        }
         // Transient rejection (rate limit, server error): keep and stop.
         this.log?.error(`enterprise projection report was rejected with HTTP ${String(status)}`)
         return false

@@ -160,6 +160,27 @@ describe('enterprise projection policy discovery', () => {
     await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
   })
 
+  it('drops a permanently rejected batch on 400 and lets the next heartbeat through', async () => {
+    const { reporter, requests } = buildReporter({ responses: [{ status: 400 }, { status: 201 }] })
+    reporter.sessionStarted('sess-1')
+    await expect(vi.waitFor(() => reporter.flush())).resolves.toBe(true)
+    expect(reporter.pendingCount).toBe(0)
+    expect(requests).toHaveLength(1)
+
+    // The queue no longer blocks on the refused batch head: the next renewal
+    // submit synthesizes a heartbeat, and the refused seq was never accepted
+    // so the local counter did not advance past it.
+    await expect(reporter.submitHeartbeat()).resolves.toBe(true)
+    expect(requests).toHaveLength(2)
+    const firstSeq = parseBatch(requests[0]?.body ?? '{}').seq
+    expect(firstSeq).toBe(1)
+    expect(parseBatch(requests[1]?.body ?? '{}').seq).toBe(firstSeq)
+    expect(parseBatch(requests[1]?.body ?? '{}').events[0]).toMatchObject({
+      sessionId: 'sess-1',
+      eventType: 'heartbeat',
+    })
+  })
+
   it('sends nothing while signed out and keeps the events queued', async () => {
     const { reporter, requests } = buildReporter({ accessToken: undefined })
     reporter.sessionStarted('sess-1')
