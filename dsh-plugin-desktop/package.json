@@ -125,6 +125,7 @@
     "start": "node lib/bin.js",
     "dev": "yarn run build && node lib/bin.js",
     "package:dir": "yarn run build && node scripts/package-dir.mjs",
+    "dist:linux": "yarn run build && node scripts/package-linux.ts",
     "dist:mac": "node scripts/release-mac.ts",
     "dist:mac-smoke": "node scripts/package-mac.ts",
     "dist:win": "node scripts/package-win.ts",

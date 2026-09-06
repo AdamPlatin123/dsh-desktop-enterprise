@@ -136,3 +136,26 @@ diff --git a/templates/nsis/include/installUtil.nsh b/templates/nsis/include/ins
 +        # Code 2 is handled by the non-atomic in-place replacement path.
 +        Return
 +      ${endIf}
+diff --git a/out/targets/nsis/NsisTarget.js b/out/targets/nsis/NsisTarget.js
+index ee7be54871dab98646e0bc5a918d4240e241512e..cda2b64f7424dde4dd885f7802f8a14714e64b98 100644
+--- a/out/targets/nsis/NsisTarget.js
++++ b/out/targets/nsis/NsisTarget.js
+@@ -358,7 +358,17 @@ class NsisTarget extends core_1.Target {
+         await this.executeMakensis(defines, commands, sharedHeader + (await this.computeFinalScript(script, false, archs)));
+         // http://forums.winamp.com/showthread.php?p=3078545
+         // TODO: remove workaround when wine is fully upgraded to 11
+-        if ((0, macosVersion_1.isMacOsCatalina)()) {
++        // DSH cross-packaging: Linux hosts have no Wine VM, so reuse the
++        // pure-JS uninstaller extraction that macOS Catalina already relies on.
++        if (process.platform === "linux") {
++            try {
++                await nsisUtil_1.UninstallerReader.exec(installerPath, uninstallerPath);
++            }
++            catch (error) {
++                throw new Error(`Cannot extract the NSIS uninstaller on a Linux host without Wine: ${error.message}`);
++            }
++        }
++        else if ((0, macosVersion_1.isMacOsCatalina)()) {
+             try {
+                 await nsisUtil_1.UninstallerReader.exec(installerPath, uninstallerPath);
+             }
