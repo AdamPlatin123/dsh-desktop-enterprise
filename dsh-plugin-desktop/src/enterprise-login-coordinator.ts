@@ -16,6 +16,7 @@ import {
 } from './enterprise-loopback-callback.ts'
 import { EnterpriseTokenStoreError, enterpriseTokenSchedule, type EnterpriseTokenSet } from './enterprise-token-store.ts'
 import { enterpriseLoginCopy, type EnterpriseLoginView } from './enterprise-login-copy.ts'
+import { fetchEnterpriseIdentity, fetchEnterpriseIdentityTransport, type EnterpriseIdentityTransport } from './enterprise-identity.ts'
 import type { DesktopLocale } from './runtime.ts'
 
 export type EnterpriseLoginAttemptOutcome =
@@ -43,6 +44,8 @@ export interface EnterpriseLoginCoordinatorDeps {
   readonly openBrowser: (url: string) => void | Promise<void>
   /** Injectable for tests; defaults to the real RFC 8252 loopback listener. */
   readonly startListener?: typeof EnterpriseLoopbackListener.start
+  /** Injectable for tests; defaults to the shared fetch transport. Carries the userinfo fallback for the display username. */
+  readonly identityTransport?: EnterpriseIdentityTransport
   readonly persistTokens: (tokens: EnterpriseTokenSet) => Promise<void>
   readonly now: () => number
   readonly log?: { readonly error: (message: string) => void }
@@ -186,7 +189,11 @@ export class EnterpriseLoginCoordinator {
       })
       const now = this.deps.now()
       const schedule = enterpriseTokenSchedule(response.expiresInSeconds, now)
+      // Display username: the id_token when it carries one, otherwise the
+      // userinfo face. Best-effort either way — a fallback failure only
+      // hides the welcome name, never the session.
       const username = parseEnterpriseIdTokenUsername(response.idToken)
+        ?? await this.resolveUsername(response.accessToken)
       tokens = Object.freeze({
         accessToken: response.accessToken,
         refreshToken: response.refreshToken,
@@ -220,6 +227,20 @@ export class EnterpriseLoginCoordinator {
 
     await this.ui.show('success', tokens.username === undefined ? {} : { username: tokens.username })
     return 'authenticated'
+  }
+
+  /** Userinfo fallback for the display username when the id_token carries none. */
+  private async resolveUsername(accessToken: string): Promise<string | undefined> {
+    try {
+      const identity = await fetchEnterpriseIdentity(
+        this.deps.identityTransport ?? fetchEnterpriseIdentityTransport,
+        { gatewayUrl: this.deps.gatewayUrl, accessToken },
+      )
+      return identity.username
+    } catch (cause) {
+      this.deps.log?.error(`dsh-plugin-desktop: userinfo username fallback failed: ${describe(cause)}`)
+      return undefined
+    }
   }
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { EnterpriseLoginCoordinator, type EnterpriseLoginUi } from '../src/enterprise-login-coordinator.ts'
 import { EnterpriseLoopbackError, EnterpriseLoopbackListener, type EnterpriseLoopbackCallback, type EnterpriseLoopbackListenerOptions } from '../src/enterprise-loopback-callback.ts'
 import { EnterpriseTokenStoreError, type EnterpriseTokenSet } from '../src/enterprise-token-store.ts'
+import type { EnterpriseIdentityTransport } from '../src/enterprise-identity.ts'
 
 type TokenTransport = (endpoint: string, form: URLSearchParams) => Promise<{ status: number, text: string }>
 
@@ -48,12 +49,20 @@ function idTokenWithUsername(username: string): string {
   return `h.${Buffer.from(JSON.stringify({ username, sub: 'u-1' }), 'utf8').toString('base64url')}.s`
 }
 
+function idTokenWithoutUsername(): string {
+  return `h.${Buffer.from(JSON.stringify({ iss: 'https://gateway.example.com', sub: 'u-1', aud: 'dsh-desktop' }), 'utf8').toString('base64url')}.s`
+}
+
+type IdentityTransport = (endpoint: string, init: { method: string, headers: Record<string, string> }) => Promise<{ status: number, text: string }>
+
 interface HarnessOptions {
   readonly persistError?: Error
   readonly transport?: TokenTransport
+  readonly idToken?: string
+  readonly identityTransport?: IdentityTransport
 }
 
-function harness({ persistError, transport }: HarnessOptions = {}) {
+function harness({ persistError, transport, idToken, identityTransport }: HarnessOptions = {}) {
   const fake = fakeListenerFactory()
   const views: Array<{ view: string, context?: { readonly username?: string, readonly errorMessage?: string } }> = []
   const ui: EnterpriseLoginUi = {
@@ -68,9 +77,10 @@ function harness({ persistError, transport }: HarnessOptions = {}) {
       refresh_token: 'refresh-new',
       expires_in: 600,
       token_type: 'Bearer',
-      id_token: idTokenWithUsername('member'),
+      id_token: idToken ?? idTokenWithUsername('member'),
     }),
   })))
+  const identityTransportSpy = identityTransport === undefined ? undefined : vi.fn(identityTransport)
   const coordinator = new EnterpriseLoginCoordinator({
     locale: 'zh',
     gatewayUrl: 'https://gateway.example.com',
@@ -80,13 +90,14 @@ function harness({ persistError, transport }: HarnessOptions = {}) {
     transport: tokenTransport,
     openBrowser: url => { openedUrls.push(url) },
     startListener: fake.start as unknown as typeof EnterpriseLoopbackListener.start,
+    ...(identityTransportSpy === undefined ? {} : { identityTransport: identityTransportSpy as unknown as EnterpriseIdentityTransport }),
     persistTokens: async tokens => {
       if (persistError !== undefined) throw persistError
       persisted.push(tokens)
     },
     now: () => 1_000_000,
   }, ui)
-  return { coordinator, views, openedUrls, persisted, fake, tokenTransport }
+  return { coordinator, views, openedUrls, persisted, fake, tokenTransport, identityTransportSpy }
 }
 
 /** Extract the state the coordinator embedded in its (last) authorize URL. */
@@ -212,5 +223,41 @@ describe('enterprise login coordinator', () => {
     fake.deliver({ kind: 'success', code: 'c', state })
     await expect(pending).resolves.toBe('failed')
     expect(views.at(-1)?.view).toBe('storage-unavailable')
+  })
+
+  it('falls back to userinfo for the welcome name when the id_token carries no username claim', async () => {
+    const { coordinator, views, openedUrls, persisted, fake, identityTransportSpy } = harness({
+      idToken: idTokenWithoutUsername(),
+      identityTransport: async () => ({
+        status: 200,
+        text: JSON.stringify({ username: 'member-from-userinfo', role: 'member' }),
+      }),
+    })
+    const pending = coordinator.attempt()
+    await flush()
+    const state = await stateFromAuthorizeUrl(openedUrls)
+    fake.deliver({ kind: 'success', code: 'c', state })
+    await expect(pending).resolves.toBe('authenticated')
+    expect(views.at(-1)).toMatchObject({ view: 'success', context: { username: 'member-from-userinfo' } })
+    expect(persisted[0]?.username).toBe('member-from-userinfo')
+    // the fallback read went out with the fresh access token
+    expect(identityTransportSpy?.mock.calls.length ?? 0).toBe(1)
+    const init = identityTransportSpy?.mock.calls[0]?.[1] as { headers: Record<string, string> }
+    expect(init.headers.authorization).toBe('Bearer access-new')
+  })
+
+  it('keeps the session authenticated when the userinfo fallback fails (welcome name only is lost)', async () => {
+    const { coordinator, views, openedUrls, persisted, fake } = harness({
+      idToken: idTokenWithoutUsername(),
+      identityTransport: async () => ({ status: 500, text: 'boom' }),
+    })
+    const pending = coordinator.attempt()
+    await flush()
+    const state = await stateFromAuthorizeUrl(openedUrls)
+    fake.deliver({ kind: 'success', code: 'c', state })
+    await expect(pending).resolves.toBe('authenticated')
+    expect(views.at(-1)?.view).toBe('success')
+    expect(views.at(-1)?.context?.username).toBeUndefined()
+    expect(persisted[0]?.username).toBeUndefined()
   })
 })

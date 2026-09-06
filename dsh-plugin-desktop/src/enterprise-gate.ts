@@ -320,6 +320,7 @@ export class DesktopEnterpriseGate {
       timeoutMs: this.timeoutMs,
       transport: this.transport,
       openBrowser: this.deps.openExternal,
+      ...(this.deps.identityTransport === undefined ? {} : { identityTransport: this.deps.identityTransport }),
       persistTokens: tokens => saveEnterpriseTokens(this.deps.userDataDir, this.deps.protector, tokens),
       now: this.now,
       log: this.deps.logger,
