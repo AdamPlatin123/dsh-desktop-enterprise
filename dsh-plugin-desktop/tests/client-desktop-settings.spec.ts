@@ -485,8 +485,10 @@ describe('Desktop account admin entry (R22)', () => {
       method: 'POST',
       credentials: 'same-origin',
       redirect: 'error',
-      body: JSON.stringify({}),
     })
+    // The desktop route enforces "no request body" (the renderer cannot
+    // influence the composed URL), so the client must send a zero-length one.
+    expect(init.body).toBeUndefined()
   })
 
   it('surfaces a failed browser open instead of a silent no-op', async () => {

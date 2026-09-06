@@ -405,7 +405,15 @@ export function createDesktopSettingsApi(fetcher: FetchLike = globalThis.fetch.b
       parseDesktopActionAcceptance(await readResponse(await post(fetcher, ENTERPRISE_REAUTH_PATH, {})))
     },
     async openAdminConsole() {
-      parseDesktopActionAcceptance(await readResponse(await post(fetcher, ENTERPRISE_ADMIN_CONSOLE_PATH, {})))
+      // The desktop route enforces "this endpoint takes no request body" (the
+      // renderer cannot influence the composed target URL), so this call sends
+      // a zero-length POST instead of the shared JSON-body helper.
+      parseDesktopActionAcceptance(await readResponse(await fetcher(ENTERPRISE_ADMIN_CONSOLE_PATH, {
+        method: 'POST',
+        credentials: 'same-origin',
+        redirect: 'error',
+        headers: { 'Accept': 'application/json' },
+      })))
     },
   })
 }
