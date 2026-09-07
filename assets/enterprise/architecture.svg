@@ -1,0 +1,85 @@
+<svg width="1080" height="560" viewBox="0 0 1080 560" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <style>
+    .box { rx: 12; stroke-width: 2.5; }
+    .title { font: 700 19px sans-serif; fill: #f1f5f9; }
+    .sub { font: 13px monospace; fill: #94a3b8; }
+    .lbl { font: 700 15px sans-serif; fill: #38bdf8; }
+    .flow { font: 12.5px monospace; fill: #a5b4fc; }
+  </style>
+
+  <rect width="1080" height="560" rx="16" fill="#0b1220"/>
+  <text x="540" y="42" text-anchor="middle" class="lbl" font-size="21">密钥隔离架构 — 真实 API key 永不进入执行面</text>
+
+  <!-- 桌面端 -->
+  <rect x="60" y="90" class="box" width="300" height="330" fill="#12233d" stroke="#64748b"/>
+  <text x="210" y="124" text-anchor="middle" class="title">🖥 桌面客户端</text>
+  <text x="210" y="150" text-anchor="middle" class="sub">DSH Desktop (本机执行)</text>
+
+  <rect x="85" y="175" rx="8" width="250" height="52" fill="#0f2b4d" stroke="#38bdf8"/>
+  <text x="210" y="197" text-anchor="middle" class="sub" fill="#7dd3fc">登录引导窗 → 系统浏览器 OAuth</text>
+  <text x="210" y="215" text-anchor="middle" class="flow">PKCE · safeStorage 钥匙串</text>
+
+  <rect x="85" y="240" rx="8" width="250" height="52" fill="#0f2b4d" stroke="#818cf8"/>
+  <text x="210" y="262" text-anchor="middle" class="sub" fill="#c4b5fd">LLM 令牌链 (env 热更新)</text>
+  <text x="210" y="280" text-anchor="middle" class="flow">DSH_LLM_TOKEN · TTL 10min</text>
+
+  <rect x="85" y="305" rx="8" width="250" height="52" fill="#0f2b4d" stroke="#64748b"/>
+  <text x="210" y="327" text-anchor="middle" class="sub">本机 DSH Host (agent 执行)</text>
+  <text x="210" y="345" text-anchor="middle" class="flow">文件 · 终端 · 工具 — 数据不出本机</text>
+
+  <rect x="85" y="370" rx="8" width="250" height="34" fill="#0d1f36" stroke="#334155"/>
+  <text x="210" y="392" text-anchor="middle" class="flow">❌ 无真实密钥 ❌ 无默认外联</text>
+
+  <!-- 网关 -->
+  <rect x="440" y="90" class="box" width="280" height="330" fill="#101c33" stroke="#38bdf8"/>
+  <text x="580" y="124" text-anchor="middle" class="title">🛡 企业网关 (服务端)</text>
+  <text x="580" y="150" text-anchor="middle" class="sub">DSH Enterprise 单点部署</text>
+
+  <rect x="462" y="175" rx="8" width="236" height="44" fill="#0f2b4d" stroke="#2d5a8f"/>
+  <text x="580" y="195" text-anchor="middle" class="sub" fill="#7dd3fc">OIDC Provider (ES256/JWKS)</text>
+  <text x="580" y="211" text-anchor="middle" class="flow">discovery · userinfo · revoke</text>
+
+  <rect x="462" y="228" rx="8" width="236" height="44" fill="#0f2b4d" stroke="#2d5a8f"/>
+  <text x="580" y="248" text-anchor="middle" class="sub" fill="#7dd3fc">llm-egress (出口代理)</text>
+  <text x="580" y="264" text-anchor="middle" class="flow">模型白名单 · 配额 · 审计</text>
+
+  <rect x="462" y="281" rx="8" width="236" height="44" fill="#0f2b4d" stroke="#2d5a8f"/>
+  <text x="580" y="301" text-anchor="middle" class="sub" fill="#7dd3fc">令牌签发 / 吊销</text>
+  <text x="580" y="317" text-anchor="middle" class="flow">kind=worker|desktop 水位隔离</text>
+
+  <rect x="462" y="334" rx="8" width="236" height="44" fill="#0d2438" stroke="#164e63"/>
+  <text x="580" y="354" text-anchor="middle" class="sub" fill="#67e8f9">control.db (SQLite)</text>
+  <text x="580" y="370" text-anchor="middle" class="flow">密文 key · append-only 审计</text>
+
+  <rect x="462" y="384" rx="8" width="236" height="28" fill="#0d1f36" stroke="#164e63"/>
+  <text x="580" y="403" text-anchor="middle" class="flow">master.key 0600 库外分离</text>
+
+  <!-- 上游 -->
+  <rect x="800" y="150" class="box" width="220" height="150" fill="#12233d" stroke="#64748b"/>
+  <text x="910" y="184" text-anchor="middle" class="title" font-size="17">☁ LLM 上游</text>
+  <text x="910" y="210" text-anchor="middle" class="sub">DeepSeek API / 自建</text>
+  <text x="910" y="234" text-anchor="middle" class="flow">或经 new-api 多渠道路由</text>
+  <text x="910" y="262" text-anchor="middle" class="flow">Bearer sk-real-***（密钥）</text>
+
+  <!-- 流程箭头 -->
+  <line x1="360" y1="200" x2="440" y2="197" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="400" y="185" text-anchor="middle" class="flow" font-size="11.5">OAuth 流</text>
+
+  <line x1="360" y1="266" x2="440" y2="263" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="400" y="252" text-anchor="middle" class="flow" font-size="11.5">v1.令牌</text>
+
+  <line x1="720" y1="250" x2="800" y2="235" stroke="#64748b" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="760" y="228" text-anchor="middle" class="flow" font-size="11.5">真实 key</text>
+
+  <!-- 底部断言带 -->
+  <rect x="60" y="455" rx="10" width="960" height="66" fill="#0d2438" stroke="#164e63"/>
+  <text x="540" y="483" text-anchor="middle" class="sub" fill="#67e8f9">✓ 桌面进程环境无真实 key（字节级断言）　✓ 备份目录无明文 key（递归扫描）</text>
+  <text x="540" y="505" text-anchor="middle" class="sub" fill="#67e8f9">✓ worker/桌面令牌双向吊销隔离　✓ 外联归零：更新/市场/遥测默认关闭</text>
+
+  <text x="540" y="545" text-anchor="middle" class="flow" fill="#475569">端到端验收：desktop-composition 12 步 + GUI 真机五幕</text>
+</svg>

@@ -1,221 +1,103 @@
-<p align="center">
-  <img src="assets/desktop-hero-zh.png" alt="DSH Desktop：基于 DeepSeek Harness 构建的开源桌面客户端" width="100%">
-</p>
+![DSH Desktop Enterprise](assets/enterprise/hero-banner.svg)
 
-<h1 align="center">DSH Desktop</h1>
+# **DSH Desktop Enterprise**
 
-<p align="center">
-  <strong>基于 DeepSeek Harness 构建的 Windows 和 macOS 开源桌面客户端。</strong>
-</p>
+**DSH Enterprise 平台的官方桌面客户端：Agent 在本机执行，模型访问由企业网关统一治理。**
 
-<h3 align="center">企业内网自部署构建（DSH Enterprise fork）。</h3>
+![MIT](https://img.shields.io/badge/License-MIT-green) ![Platforms](https://img.shields.io/badge/Platforms-Windows%20x64%20%7C%20macOS%20%7C%20Linux-blue) ![Zero Telemetry](https://img.shields.io/badge/Telemetry-Zero%20by%20Default-teal) ![OAuth2](https://img.shields.io/badge/Auth-OAuth2%20%2B%20PKCE-orange)
 
-<p align="center">
-  万物皆「插件」，桌面本身也是「插件」。
-</p>
+这是 [anywhere-labs/dsh-desktop](https://github.com/anywhere-labs/dsh-desktop) 的企业化 fork，面向使用 DSH Enterprise 内网自部署、多租户 Agent 运行时的企业开发者与平台团队。**需要配套的私有部署网关，不是独立的公共模型客户端。**
 
-<p align="center"><sub>独立的社区开源项目，与深度求索不存在隶属、合作、授权或背书关系。<br>本仓库目前无深度求索员工或 DeepSeek Harness 上游官方团队成员参与；GitHub Contributors 中显示的上游贡献者来自 fork 继承和同步的提交历史。<br>中文 · <a href="README.en.md">English</a></sub></p>
+## **为什么选它**
 
-<p align="center">
-  <img src="assets/desktop-chat-zh.png" alt="DSH Desktop 中文对话界面" width="100%">
-</p>
+### **密钥不下发，权限可收回**
+真实大模型 API key 由企业网关保管，桌面调用模型只使用 **10 分钟短期代际令牌**。网关按令牌用途字段 `kind` 隔离权限，通过代际校验与吊销收回访问，并统一执行模型白名单、配额和审计。
+**机制证据：** 模型出口令牌由网关签发，续签后热更新运行时环境；后续请求读取新令牌，无需把真实密钥写入桌面配置。
 
-<p align="center">
-  <a href="https://github.com/anywhere-labs/deepseek-harness-desktop/releases/latest"><img src="https://img.shields.io/github/v/release/anywhere-labs/deepseek-harness-desktop?style=flat&amp;label=release&amp;color=4D6BFE" alt="Latest release"></a>
-  <a href="https://github.com/anywhere-labs/deepseek-harness-desktop/releases"><img src="https://img.shields.io/github/downloads/anywhere-labs/deepseek-harness-desktop/total?style=flat&amp;label=downloads&amp;color=4D6BFE" alt="Total downloads"></a>
-  <a href="https://github.com/anywhere-labs/deepseek-harness-desktop"><img src="https://img.shields.io/github/stars/anywhere-labs/deepseek-harness-desktop?style=flat&amp;label=%E2%98%85&amp;color=08C" alt="GitHub stars"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-4493F8?style=flat-square" alt="Supported platforms: macOS and Windows">
-</p>
+### **本机执行，集中管控模型出口**
+文件操作、终端命令和工具在用户设备上执行，无需把工作目录迁移到服务端运行。模型请求经企业网关代理，平台团队集中管理模型访问。
+**边界证据：** 本机执行不等于所有数据绝不出机；进入模型上下文的文件片段、提示词和工具结果会随请求发送至网关及其配置的模型服务。
 
-DSH Desktop 将 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的本地 Web UI、Host 服务和插件系统集成到原生桌面应用中。项目固定并原样运行特定上游版本；DSH Desktop 提供窗口、托盘、终端、更新和工作配置，并通过 DeepSeek Harness 提供的插件机制与上游能力组合。
+### **企业登录，不接触密码**
+使用 OAuth 2.0 / OpenID Connect（OIDC 身份认证协议）授权码流程，配合 PKCE（授权码交换证明密钥），在系统浏览器完成认证。
+**机制证据：** 桌面不承载密码输入；OAuth 令牌通过 Electron `safeStorage` 使用系统安全存储能力加密落盘，安全存储不可用时拒绝保存，不降级为明文。
 
-<a id="run"></a>
+### **默认关闭外联入口**
+更新检查、社区市场和遥测默认关闭；管理员可预置自建更新源，不依赖上游公共更新服务。
+**机制证据：** 未配置更新源时不注册更新入口、不轮询；上游公共更新域名及其子域被直接拒绝，配置无效也不会回退上游。依赖物化、包安装及联网工具仍可能产生按需外联，完全内网部署须另行配置镜像与网络策略。
 
-## 下载与安装
+## **架构**
 
-本仓库为企业内网自部署构建：安装包由组织内部分发，更新检查默认关闭，仅在部署方预置组织自建更新源时启用（见 [`docs/enterprise-self-hosting.md`](docs/enterprise-self-hosting.md)）。支持平台为 Windows x64 与 macOS Universal，安装方式不变（NSIS 安装程序 / DMG 拖入 Applications）。
+桌面负责本地执行，网关负责身份、租户权限与模型出口。两者之间传递短期凭证和必要请求，不分发模型供应商密钥。
 
-详细步骤、插件命令和故障排查见[用户指南](docs/user-guide.md)与[常见问题](docs/faq.md)。
+![企业架构与信任边界](assets/enterprise/architecture.svg)
 
-我们希望和所有插件作者一起，构建一个开放、可组合、可持续的 DSH 插件生态，让每个插件都能与其他插件共同进步：[DSH 插件生态倡议书](docs/plugin-ecosystem.md)。
+真实密钥仅由网关出口用于模型服务鉴权；桌面拿到的是可过期、可吊销的代理访问凭证，而不是企业长期密钥。
 
-## 文档
+## **登录流程**
 
-普通用户从[用户指南](docs/user-guide.md)开始即可；开发者文档只在需要扩展或维护时才需要阅读。
+预置企业网关 → 系统浏览器认证 → 本机回环回调 → 校验授权状态并交换授权码 → 加密保存 OAuth 凭证 → 获取模型出口令牌。
 
-### 用户文档
+![OAuth 登录与令牌续签流程](assets/enterprise/oauth-flow.svg)
 
-| 目标 | 入口 |
-| --- | --- |
-| 安装和日常使用 | [用户指南](docs/user-guide.md) |
-| 快速确认平台、环境和使用边界 | [常见问题](docs/faq.md) |
-| 了解数据处理与隐私选择 | [隐私政策](PRIVACY.zh.md) |
-| 了解项目为什么存在 | [为什么做 DSH Desktop](docs/why-desktop.md) |
-| 查看全部文档与 README 分工 | [文档索引](docs/README.md) |
+OAuth 会话与模型出口令牌分别续签；模型令牌通过环境热更新生效。拥有 `admin` 角色的用户可从菜单在系统浏览器打开企业管理台，实际权限由服务端校验。
 
-### 开发者与维护者文档
+## **真机界面**
 
-| 目标 | 入口 |
-| --- | --- |
-| 阅读插件生态倡议书 | [插件生态倡议书](docs/plugin-ecosystem.md) |
-| 编写普通或 Desktop 插件 | [插件开发](docs/plugin-development.md) |
-| 参与统一插件 contract 讨论 | [DSH Community Fabric Draft](dsh-community-fabric/README.zh.md) |
-| 了解统一插件框架为什么这样设计 | [成熟框架与真实插件调研](dsh-community-fabric/docs/research/mature-plugin-frameworks.zh.md) |
-| 查看插件市场的产品与安全设计 | [DSH Community Market](dsh-community-market/README.zh.md) |
-| 了解桌面插件可以使用的能力 | [桌面插件接口说明](dsh-plugin-desktop/docs/plugin-services.zh.md) |
-| 了解桌面应用如何工作 | [架构说明](docs/architecture.md) |
-| 查阅包级构建与发布细节 | [`dsh-plugin-desktop/README.md`](dsh-plugin-desktop/README.md) |
+登录入口展示组织预置的网关，不要求用户输入模型密钥，也不允许在登录页随意更换认证地址。
 
-## 主要功能
+![企业登录入口真机截图](assets/enterprise/login-gate.png)
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Desktop</h3>
-      <p>把上游 DeepSeek Harness 的本地 Web UI 带到原生桌面。应用自动启动和管理本地 Harness 服务，集成系统托盘与桌面窗口，无需安装 Node.js 或执行命令。</p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>手机远程控制 <img src="https://img.shields.io/badge/%E5%8D%B3%E5%B0%86%E6%8E%A8%E5%87%BA-F59E0B?style=flat-square" alt="即将推出"></h3>
-      <p>通过 iOS 和 Android 远程连接 Desktop，在手机上发起任务、查看 Agent 进度，并在需要时继续跟进。</p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3><a href="dsh-community-market/README.zh.md">插件市场</a> <img src="https://img.shields.io/badge/%E5%B7%B2%E5%86%85%E7%BD%AE-2EA44F?style=flat-square" alt="已内置"></h3>
-      <p>DSH Community Market 已完成并内置，提供插件发现、详情、安装与管理。市场以开放方式连接各种插件数据源：任何人都可以提供、接入和使用符合公开 Schema 的来源，已有 API 也可以通过受审 adapter 加入合作数据源。</p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>共建插件生态</h3>
-      <p>DSH 的插件生态由社区共同建设。上游插件、DSH Desktop 插件和其他社区插件遵循统一的约定，可以通过相同的组合机制共同工作；欢迎加入共建，详见 <a href="docs/plugin-ecosystem.md">DSH 插件生态倡议书</a>。</p>
-    </td>
-  </tr>
-</table>
+端到端验收采用 **12 步组合剧本 + 图形界面真机五幕**：登录、开启会话、吊销后重登、登出换用户、管理入口。三平台打包就绪不等同于每个平台都已完成同一轮真机验收。
 
-### 首次设置、浏览器与局域网访问
+## **快速开始**
 
-每个尚未初始化的 profile 正常首次启动时，会先显示由 Desktop 自己提供的原生 Setup Wizard。它可以设置窗口模式与系统材质、插件市场、通知、是否用系统默认浏览器自动打开，以及 Web 访问范围；也可以直接跳过。向导完成或跳过以前，Host 和主 DSH 窗口都不会启动。完成或跳过状态按 profile 分别记录；显式恢复启动仍优先进入恢复助手。
+准备 Git、Node.js **22.19+（22.x）或 ≥24**、Corepack，以及仓库锁定的 **Yarn 4.18.0**。先由管理员提供可访问的 DSH Enterprise 网关和已注册的桌面 OAuth 客户端标识；本机需要图形桌面与可用的系统安全存储：
 
-Web 服务默认仅监听本机回环地址。开启“用浏览器打开”后，Desktop 会在 Web 服务实际就绪时交给系统默认浏览器打开；这个选项不会改变网络暴露范围。“桌面设置”会在选项下显示实际的本机 URL。局域网访问是一个独立的可选设置，开启后还会显示当前可用的局域网 URL。
-
-> **危险：** 向局域网开放不提供鉴权；所有与你处于同一局域网的人都能直接打开 DSH 并操作你的电脑。请只在完全信任的网络中谨慎开启。
-
-自动更新的固定版本检查请求会在 `X-DSH-Desktop-Version` header 中携带当前安装版本，并在 `X-DSH-Desktop-Installation-Id` header 中携带一个由本机生成并持久保存的随机 UUID；它不是从硬件信息推导出的标识。安装包下载请求及其下载重定向不会携带这些 header。
-
-## 插件生态
-
-插件是给 DSH 添加能力的扩展包——模型、工具、界面、工作流都可以做成插件，像搭积木一样自由组合。
-
-DSH Desktop 没有修改上游源码，也不是一个固定写死的外壳。固定版本的上游 DeepSeek Harness 原样运行；桌面壳本身——窗口、托盘、终端、更新、工作配置——作为 DSH 插件接入，并通过 DeepSeek Harness 提供的插件机制与上游能力组合进同一个运行时。从核心 agent 到桌面外壳，整个产品遵守同一条"一切皆插件"的规则：与所固定上游版本兼容的插件可以使用，桌面能力也按插件的方式组合、替换和演进。
-
-我们希望插件生态像手机应用一样：每个插件按同一套规则开发，装在一起也能一起工作、互不干扰。
-
-### 给开发者
-
-与许多其他项目不同，这个项目本身就是一个 DSH [插件](docs/plugin-development.md)：桌面壳与第三方插件使用相同的插件组合机制。Desktop 的插件能力已经可以使用。我们提供了 Desktop 服务，让插件开发者能够把插件与桌面能力集成起来：例如查看和切换工作配置，或在当前配置中安装、更新和移除插件。完整用法见[桌面插件接口说明](dsh-plugin-desktop/docs/plugin-services.zh.md)。为什么选择这样的边界、哪些能力不会暴露给第三方插件，见[为什么做 DSH Desktop](docs/why-desktop.md)和[插件开发指南](docs/plugin-development.md)。
-
-## 与 DeepSeek Harness 的关系
-
-DSH Desktop 是基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 和 Cordis 插件思想构建的独立社区项目，旨在提供开放、可组合的 DSH 桌面体验。
-
-本仓库由社区独立维护，目前不存在深度求索员工或 DeepSeek Harness 上游官方团队成员参与本项目开发、维护或治理的情形。GitHub Contributors 页面中可能出现的上游贡献者，来自本仓库 fork 时继承及后续同步的上游提交历史；该署名仅反映提交来源，不代表相关人员参与本仓库，也不构成任何隶属、合作、授权或背书关系。
-
-上游项目提供核心的智能体能力、插件系统和 Web UI；DSH Desktop 主要负责：
-
-- 桌面应用封装
-- 本地服务的启动、停止与恢复
-- 桌面窗口和系统托盘集成
-- macOS、Windows 安装包构建与发布
-- 更适合桌面使用的界面体验
-
-如果你希望通过命令行运行 DeepSeek Harness，或者参与其核心功能开发，请优先查看上游仓库。
-
-## 特别感谢
-
-特别感谢 [DeepSeek Harness 原始仓库](https://github.com/deepseek-ai/deepseek-harness) 和 DeepSeek AI 团队。DSH Desktop 基于固定版本的上游源码构建，核心的智能体、模型、工具、会话、Web UI 和插件生态都来自这个项目。
-
-同时感谢 [Cordis](https://github.com/cordiverse/cordis) 项目提供的插件化基础。没有这些开源项目，就不会有 DSH Desktop。
-
-也感谢 [Koishi.js](https://koishi.chat/) 项目和社区长期积累的插件化实践、工具与经验，以及所有参与讨论、测试、反馈和插件开发的社区成员。
-
-以及每一个使用、支持和参与共建的你。
-
-<a id="run-from-source"></a>
-
-## 开发
-
-桌面端代码位于 `dsh-plugin-desktop/`，外层仓库使用 Yarn，固定的 `deepseek-harness/` 子模块继续使用自己的 pnpm workspace。从仓库根目录执行：
-
-```sh
-git submodule update --init --recursive
+```bash
+git clone --recurse-submodules https://github.com/AdamPlatin123/dsh-desktop-enterprise.git
+cd dsh-desktop-enterprise
 corepack yarn install --immutable
+export DSH_ENTERPRISE_GATEWAY_URL="https://gateway.corp.example"
+export DSH_ENTERPRISE_OAUTH_CLIENT_ID="your-registered-desktop-client-id"
 corepack yarn dev
 ```
 
-headless 检查使用 `corepack yarn check`；完整的构建、测试和发布边界见[架构说明](docs/architecture.md)和包级 [`README`](dsh-plugin-desktop/README.md)。如何参与贡献见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+网关地址必须是源点，不带业务路径、查询参数或内嵌凭据；示例值需替换为组织实际配置。客户端标识不是密钥，**不要在桌面配置真实模型 API key**。缺少预置时应用显示配置错误，不进入普通客户端模式。
 
-## 社区交流
+## **打包**
 
-可选择常用的平台参与讨论，交流使用问题、插件开发和项目进展。
+构建前设置上述两个企业环境变量；需要自建更新时额外预置 `DSH_ENTERPRISE_UPDATE_URL`。在相应原生平台执行：
 
-<table>
-  <thead>
-    <tr>
-      <th align="center">企业微信</th>
-      <th align="center">QQ群</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="assets/community-wechat-group.png" alt="DSH Desktop 企业微信二维码" title="扫码添加企业微信" width="180" height="180"></td>
-      <td align="center"><img src="assets/community-qq-group.jpg" alt="DSH Desktop QQ群二维码" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
-
-如果您希望加入我们的技术团队，也欢迎通过 [t4wefan@qq.com](mailto:t4wefan@qq.com) 联系我们。
-
-## 友情链接
-
-这里收录 DeepSeek Harness 生态项目及开发者工具。
-
-| 项目 | 简介 | 链接 |
+| 平台 | 命令 | 说明 |
 | --- | --- | --- |
-| dshfind | DeepSeek Harness（DSH）学习与分享社区。 | [GitHub](https://github.com/hikariming/dshfind) · [官网](https://dshfind.com) |
-| DSH 1024Store | 面向 DeepSeek Harness（dsh）生态的社区插件目录（收录 4120 个插件），并开源了在线插件市场、目录流水线与公开查询 API，可 fork 自建市场。 | [GitHub](https://github.com/imsai-sh/awesome-deepseek-harness-plugins) |
-| Awesome DSH Plugin | DeepSeek Harness（DSH）插件精选列表。 | [GitHub](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) |
-| dsh-market | DeepSeek Harness 内的可视化插件市场，支持浏览、搜索与一键安装插件。 | [GitHub](https://github.com/dsh-market/dsh-market) |
-| ModLens | 为 DeepSeek Harness 和纯文本 Coding Agent 提供 OCR、版面与语义识别能力。 | [GitHub](https://github.com/liustack/modlens) · [官网](https://liustack.dev) |
-| DeepSeek Harness 橙皮书 | DeepSeek Harness 社区实测手册。 | [GitHub](https://github.com/alchaincyf/deepseek-harness-orange-book) |
-| dsh-web-ui | DeepSeek Harness Web UI 插件与皮肤合集。 | [GitHub](https://github.com/zhu1090093659/dsh-web-ui) · [展示站](https://gallery.dsh-market.com) |
-| dsh-TUI | DeepSeek Harness 全屏交互式终端界面。 | [GitHub](https://github.com/ccch1mneyyy/dsh-TUI) |
-| dsh-tianshu-tui | DSH Web 端交互式终端极简风格 UI 插件，自研 ANSI 渲染核心、极致丝滑流畅；在官方基础上增加了 TDD、证据门、视觉图像模块等工作流。 | [GitHub](https://github.com/huiliyi37/dsh-tianshu-tui) |
-| dsh-context | DSH 上下文洞察面板：Context 仪表盘 + /context 命令 + Context 浏览器，一站式查看 Context 的分类组成、内容详情、演进趋势、压缩/注入事件与统计，覆盖 Context 全生命周期管理。 | [GitHub](https://github.com/bowenliang123/dsh-context) · [NPM](https://www.npmjs.com/package/dsh-context) |
-| Agents-Anywhere | 从手机远程控制电脑上的 Coding Agent。 | [GitHub](https://github.com/anywhere-labs/Agents-Anywhere) |
-| deepseek-harness-remote | 基于 P2P 与 APIProxy 的 DeepSeek Harness 远程控制与多端协同插件。 | [GitHub](https://github.com/liguobao/deepseek-harness-remote) |
-| DSH-better-sidebar | DeepSeek Harness 侧边栏工作台，集成文件、终端、Git 和子代理。 | [GitHub](https://github.com/omdsh-dev/DSH-better-sidebar) |
-| Awesome DeepSeek Harness | DeepSeek Harness 插件、工具与基础设施精选列表。 | [GitHub](https://github.com/0xsline/awesome-deepseek-harness) · [官网](https://deepseekdocs.com/) |
-| 深求社区（DeepSeek.club） | 全球最大的第三方 DeepSeek 开源生态社区，聚合模型库、应用榜、Harness 插件库与 Harness 学院，一站式服务开发者，研究者与企业用户。 | [官网](https://deepseek.club) |
-| MkSaaS · TanStarter | 面向独立开发者的商业 SaaS 启动模板。MkSaaS 基于 Next.js，TanStarter 基于 TanStack Start 与 Cloudflare，内置 AI、认证、支付和后台等常用能力。 | [MkSaaS](https://mksaas.com) · [TanStarter](https://tanstarter.dev) |
+| Windows x64 | `corepack yarn dist:win` | 本地未签名安装包；便携版使用 `corepack yarn dist:win-portable` |
+| macOS | `corepack yarn dist:mac` | 正式签名、公证构建；未签名验证使用 `corepack yarn dist:mac-smoke` |
+| Linux | `corepack yarn dist:linux` | Linux 打包流程 |
 
-<sub>如果希望收录您的项目，欢迎加入微信群并私信 @王博升Benson，或联系 t4wefan@qq.com，或<a href="https://github.com/anywhere-labs/deepseek-harness-desktop/issues">提出 issue</a>。</sub>
+签名凭据、平台限制与产物验证见[打包文档](./dsh-plugin-desktop/README.zh.md#打包)；内网更新与外联边界见[企业自托管配置](./docs/enterprise-self-hosting.md)。
 
-## License
+## **安全模型**
 
-本项目遵循 [MIT License](LICENSE)。
+| 数据 | 存放或流转位置 | 谁可访问 |
+| --- | --- | --- |
+| 真实模型 API key | 企业网关保管，出口请求用于模型服务鉴权 | 网关受控组件及对应模型服务鉴权端；不下发桌面 |
+| 10 分钟模型代际令牌 | 桌面运行时内存，经请求交给网关 | 桌面模型调用组件与网关；受用途、有效期和吊销状态约束 |
+| OAuth 访问与刷新令牌 | 本机 `safeStorage` 加密持久化，使用时解密 | 桌面认证组件与企业认证端；不是模型供应商密钥 |
+| 登录密码 | 系统浏览器中的企业认证页面 | 企业身份认证服务；不经过桌面应用 |
+| 工作文件与终端执行 | 用户本机 | 用户及获准执行的本地工具；纳入模型上下文的内容按下一行流转 |
+| 模型请求与响应 | 桌面 ↔ 企业网关 ↔ 配置的模型服务 | 请求链路各端；留存与审计由部署策略决定 |
+| 最小会话治理元数据 | 按组织策略发送至企业网关 | 企业治理服务；包括会话事件、工具分类计数、插件清单摘要，不含工具参数值 |
 
-> “DeepSeek Harness”是深度求索公司的注册商标。本文仅为准确说明兼容性、技术来源及与上游软件的关系而使用该名称。
+**Zero Telemetry 指默认关闭遥测，不是断网承诺。** 企业认证、模型请求和按策略启用的会话治理仍需通信；本地工具的网络权限也需要组织单独治理。
 
-> 本项目完全开源免费。如果有人向您以任何形式出售此软件，请拒绝交易。
+## **上游关系**
 
-> DSH Desktop 是独立的社区项目，与深度求索不存在隶属、合作、授权或背书关系。
+本 fork 在上游桌面产品基础上增加企业登录门、凭证保护、模型出口令牌与热续签、默认关闭的外联策略、自建更新源约束，以及管理员入口；**不是 Anywhere Labs 官方企业发行版**。感谢 Anywhere Labs 与 DeepSeek Harness 社区提供桌面和 Agent 运行时基础。
 
-## Star History
+上游运行时保持固定版本引用，不在桌面功能分支修改其源码。升级按[上游跟随标准操作流程](./docs/fork-sop.md)执行：核对企业补丁、重跑安全回归、单独提交版本引用变更，验证失败则暂停升级。
 
-<a href="https://www.star-history.com/?repos=anywhere-labs%2Fdeepseek-harness-desktop&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=anywhere-labs/deepseek-harness-desktop&type=date&theme=dark&legend=top-left&sealed_token=BRTkOyC4czCEkIyFb5-QxrsC-kaDotBJ8tsjxrWs-UGfmBqfRCXSwieZPlVTCYOjJVEZ29uLvmBjAPREB524J5dPN1jk-UA7ajFdLdrbjumJqoOBeGWmig" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=anywhere-labs/deepseek-harness-desktop&type=date&legend=top-left&sealed_token=BRTkOyC4czCEkIyFb5-QxrsC-kaDotBJ8tsjxrWs-UGfmBqfRCXSwieZPlVTCYOjJVEZ29uLvmBjAPREB524J5dPN1jk-UA7ajFdLdrbjumJqoOBeGWmig" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=anywhere-labs/deepseek-harness-desktop&type=date&legend=top-left&sealed_token=BRTkOyC4czCEkIyFb5-QxrsC-kaDotBJ8tsjxrWs-UGfmBqfRCXSwieZPlVTCYOjJVEZ29uLvmBjAPREB524J5dPN1jk-UA7ajFdLdrbjumJqoOBeGWmig" />
- </picture>
-</a>
+## **License**
+
+采用 [MIT License](./LICENSE)，保留 **Copyright © 2026 Anywhere Labs** 与 **Copyright © 2026 DSH Desktop Enterprise contributors**。允许商业使用、修改与再分发；须保留版权及许可声明。
+英文版（English）见 [README.en.md](./README.en.md)。
